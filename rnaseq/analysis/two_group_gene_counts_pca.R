@@ -54,24 +54,25 @@ plot_pca_proj <- function(pca_res, pc_x, pc_y, n_A, n_B) {
 main <- function() {
 
     # ! SET RUN PARAMETERS HERE !
-    # VST counts file
-    vst_counts_file <- "CTRL_BC16_counts_raw.csv"
+    # gene counts file
+    gene_counts_file <- "CTRL_BC16_counts_raw.csv"
     # number of samples in group A
     n_A <- 4
     # number of samples in group B
     n_B <- 5
 
     # load count data
-    counts_vst <- data.frame(t(read.csv(vst_counts_file, row.names = 1)))
+    counts <- data.frame(t(read.csv(gene_counts_file, row.names = 1)))
 
     # compute PCA
-    counts_vst_pca <- prcomp(counts_vst)
-    print(summary(counts_vst_pca))
-    print(counts_vst_pca$x[, 1:3])
+    counts_pca <- prcomp(counts)
+    print(summary(counts_pca))
+    message("PCA projections (components 1-3)")
+    print(counts_pca$x[, 1:3])
 
     # plot projections
-    plot_pca_proj(counts_vst_pca, 1, 2, n_A, n_B)
-    plot_pca_proj(counts_vst_pca, 2, 3, n_A, n_B)
+    plot_pca_proj(counts_pca, 1, 2, n_A, n_B)
+    plot_pca_proj(counts_pca, 2, 3, n_A, n_B)
 
 }
 
