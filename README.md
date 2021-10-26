@@ -7,3 +7,5 @@ __xulab_software/__
     * `two_group_gene_counts_pca.R`
   * __[processing/](rnaseq/processing/README.md)__
     * `align_and_count_features.py`
+* __imms/__
+  * [dhrmasslynxapi](imms/dhrmasslynxapi/README.md)
