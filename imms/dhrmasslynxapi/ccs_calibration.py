@@ -196,7 +196,48 @@ CCSCalibrationBase.__str__
             return "fitted parameters: \n\tA = {:.3f}\n\tt0 = {:.3f}\n\tB = {:.3f}".format(*self.cal_params)
 
 
-class CCSCalibrationRaw(CCSCalibrationBase):
+class CCSCalibrationList(CCSCalibrationBase):
+    """
+CCSCalibrationList
+    description:
+        A convenient object for making and applying CCS calibrations from lists of m/z, dt, and ref CCS
+"""
+
+    def __init__(self, masses, dts, ccss, charge=1.):
+        """
+CCSCalibrationList.__init__
+    description:
+        Initializes a new CCSCalibrationList object and constructs a calibration
+        curve based on lists of m/z, dt, and ref CCS
+    parameters:
+        masses (list(float)) -- m/z for calibrants
+        dts (list(float)) -- drift times for calibrants
+        ccss (list(float)) -- reference CCS for calibrants
+        [charge (float)] -- charge state [optional, default=1.] 
+"""
+        # call the superclass initializer
+        super().__init__()
+        
+        # store charge
+        self.charge = charge
+        
+        # store calibrant data
+        for m, d, c in zip(masses, dts, ccss):
+            self.calibrants.append({
+                'mz': m,
+                'dt': d,
+                'ref_ccs': c,
+            })
+
+        # construct the CCS calibration
+        self.fit_cal_curve(masses, dts, ccss)
+
+        # add residual ccs (%) attributes to all of the calibrants
+        for calibrant in self.calibrants:
+            calibrant['resid_ccs'] = 100. * (calibrant['ref_ccs'] - self.calibrated_ccs(calibrant['mz'], calibrant['dt'])) / calibrant['ref_ccs']
+
+
+class CCSCalibrationRaw(CCSCalibrationList):
     """
 CCSCalibrationRaw
     description:
@@ -230,60 +271,40 @@ CCSCalibrationRaw.__init__
                             [optional, default=False]
         [charge (float)] -- charge state [optional, default=1.] 
 """
-        # call the superclass initializer
-        super().__init__()
         # make sure no_init was not set
         if not no_init:
-            # store the charge
-            self.charge = charge
-            # store raw file(s) and mass list(s)
-            # always store raw files as a list of files and masses as a list of
-            # mass lists
-            if type(raw) is str:
-                self.raw = [raw]
-                self.masses = [masses]
-                self.ccss = [ccss]
-            else:
-                self.raw = raw
-                self.masses = masses
-                self.ccss = ccss
 
             # iterate through the raw file and mass list combinations
             # and store detailed information on each calibrant
-            for raw, masses, ccss in zip(self.raw, self.masses, self.ccss):
-                print("processing {} for masses: {}".format(raw, masses))
-                reader = MassLynxReader(raw)
-                for mass, ccs in zip(masses, ccss):
+            raws, dts, atds, gauss_params = [], [], [], []
+            for raw_, masses_, ccss_ in zip(raw, masses, ccss):
+                print("processing {} for masses: {}".format(raw_, masses_))
+                reader = MassLynxReader(raw_)
+                for mass, ccs in zip(masses_, ccss_):
                     # extract the ATD
                     drift_time, intensity = reader.get_chrom(dt_func, mass, mass_window)
                     # raise an error if we did not get data out for some reason
                     if not drift_time:
-                        e_msg = ""
+                        e_msg = "CCSCalibrationRaw: __init__: unable to fit drift time"
                         raise RuntimeError(e_msg)
                     # fit the ATD with a gaussian to get the drift time (parameter B)
                     A, B, C = self.peak_fit(drift_time, intensity)
                     print("\tmz {:.4f} dt {:.2f}".format(mass, B))
-                    # store the calibrant data
-                    # these could pretty easily be replaced with data classes or
-                    # even full-fledged classes instead of a dicts...
-                    self.calibrants.append({
-                        'raw': raw,
-                        'mz': mass,
-                        'dt': B,
-                        'ref_ccs': ccs,
-                        'atd': (drift_time, intensity),
-                        'gauss_params': (A, B, C)
-                    })
+                    # record calibrant data and metadata
+                    dts.append(B)
+                    raws.append(raw)
+                    atds.append((drift_time, intensity))
+                    gauss_params.append((A, B, C))
 
-            # construct the CCS calibration
-            masses_ = [calibrant['mz'] for calibrant in self.calibrants]
-            dts_ = [calibrant['dt'] for calibrant in self.calibrants]
-            ccss_ = [calibrant['ref_ccs'] for calibrant in self.calibrants]
-            self.fit_cal_curve(masses_, dts_, ccss_)
+            # create calibration using superclass __init__
+            super().__init__(masses, dts, ccss, charge=charge)
 
-            # add residual ccs (%) attributes to all of the calibrants
-            for calibrant in self.calibrants:
-                calibrant['resid_ccs'] = 100. * (calibrant['ref_ccs'] - self.calibrated_ccs(calibrant['mz'], calibrant['dt'])) / calibrant['ref_ccs']
+            # add calibrant metadata from drift time extraction to self.calibrants
+            for calibrant, raw, atd, gp in zip(self.calibrants, raws, atds, gauss_params):
+                calibrant['raw'] = raw
+                calibrant['atd'] = atd
+                calibrant['gauss_params'] = gp
+
 
     @staticmethod
     def gauss(x, A, B, C):
@@ -380,11 +401,11 @@ CCSCalibrationRawXL.__init__
             raw_dir = os.path.split(xlsx)[0]
         else:
             raw_dir = path_prefix
-        raw = [os.path.join(raw_dir, name_prefix + sheet) for sheet in xl]
+        raws = [os.path.join(raw_dir, name_prefix + sheet) for sheet in xl]
         masses = [xl[sheet].values.T.tolist()[0] for sheet in xl]
         ccss = [xl[sheet].values.T.tolist()[1] for sheet in xl]
         # call the superclass initializer
-        super().__init__(raw, masses, ccss, mass_window=mass_window, dt_func=dt_func, charge=charge)
+        super().__init__(raws, masses, ccss, mass_window=mass_window, dt_func=dt_func, charge=charge)
 
     def batch_calibrated_ccs(self, xlsx, xlsx_out=None):
         """
