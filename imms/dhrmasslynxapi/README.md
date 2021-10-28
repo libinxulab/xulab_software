@@ -219,3 +219,28 @@ calibrant information. The first column in each sheet is the calibrant m/z and t
 should be no headers_
 
 
+### `calibrated_ccs`
+This is the primary method to use after initializing a CCS calibration object. Takes m/z and drift time as input and
+returns a calibrated CCS value based on the calibration curve established during initialization. This is the same for
+`CCSCalibrationList`, `CCSCaibrationRaw`, and `CCSCalibrationRawXL` subclasses.
+
+##### Parameters
+* `mass` (`float`) - m/z
+* `dt` (`float`) - drift time
+
+#### Returns
+* `ccs` (`float`) - calibrated ccs
+
+##### Example
+```python
+# cal is an initialized instance of CCSCalibrationList, CCSCalibrationRaw, or CCSCalibrationRawXL
+
+# get a single calibrated CCS value
+ccs = cal.calibrated_ccs(234.5678, 3.45)
+
+# get calibrated CCS values for a list of unknown m/zs and drift times
+unknown_mzs = [123.4567, 234.5678, ...]
+unknown_dts = [1.23, 2.34, ...]
+unknown_ccss = [cal.calibrated_ccs(mz, dt) for mz, dt in zip(unknown_mzs, unknown_dts)]
+
+```
