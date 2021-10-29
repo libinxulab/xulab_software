@@ -115,12 +115,12 @@ def main():
     metadata = {_['src_tag']: {'type': _['ccs_type'], 'method': _['ccs_method']} for _ in ref_info}
 
     # add each src dataset
-    print("adding cleaned datasets into C3S.db")
+    print("adding cleaned datasets into C3S.db ...")
     for dset in dsets:
         print("\tadding dataset: {} ...".format(dset),)
         add_src_dataset(cur, dset, metadata[dset])
         print("\t... done")
-    print()
+    print("... done")
 
     # save changes to the database
     con.commit()

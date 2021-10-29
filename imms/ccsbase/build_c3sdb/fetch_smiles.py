@@ -140,7 +140,7 @@ fetch_smi_byname
 
     qry = "SELECT g_id, name FROM master WHERE smi IS NULL"
     for g_id, name in cursor.execute(qry).fetchall():
-        
+        print("\t", end="")
         if name in search_cache:
             # first check the search cache for the compound
             print("found SMILES in search cache for compound: {} (g_id: {}) ... ".format(name, g_id), end="")
@@ -151,7 +151,7 @@ fetch_smi_byname
             # next try to parse the name as a lipid then search lipid maps
             p_lipid = parse_lipid(name)
             print("parsed lipid: {} (g_id: {}) ... searching LIPID MAPS ... ".format(name, g_id), end="")
-            smi = search_lmaps_smiles(sess, p_lipid)
+            smi = search_lmaps_smiles(session, p_lipid)
             if smi:
                 gid_to_smi[g_id] = smi
                 # add entry to search cache
@@ -243,6 +243,8 @@ def main():
         print(e)
         print("ERROR!\nsaving search cache and exiting ...")
     
+    print("... done")
+
     # close database connection
     con.close()
 

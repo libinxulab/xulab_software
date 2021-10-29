@@ -27,7 +27,7 @@ get_MQNs
         return features
     except Exception as e:
         #print(e)
-        print("unable to generate MQNs for SMILES: '{}'".format(smi))
+        print("\tunable to generate MQNs for SMILES: '{}'".format(smi))
         return None
 
 
@@ -36,6 +36,8 @@ def main():
 
     con = connect("C3S.db")
     cur = con.cursor()
+
+    print("Computing MQNs for all compounds with SMILES structures ...")
 
     # generate the rdk features and MQNs
     qry = "SELECT g_id, smi FROM master WHERE smi IS NOT NULL"
@@ -51,6 +53,8 @@ def main():
     for g_id in gid_to_mqn:
         qdata = (g_id, *gid_to_mqn[g_id])
         cur.execute(qry, qdata)
+
+    print("... done")
 
     con.commit()
     con.close()

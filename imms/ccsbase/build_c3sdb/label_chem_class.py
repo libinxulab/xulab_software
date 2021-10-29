@@ -28,7 +28,7 @@ label_class_byname
     qry = "SELECT g_id, name FROM master WHERE chem_class_label IS NULL"
     for g_id, name in cursor.execute(qry).fetchall():
         
-        print('(g_id: {}) {:40s} looks like a'.format(g_id, name), end=' ')
+        print('\t(g_id: {}) {:40s} looks like a'.format(g_id, name), end=' ')
 
         if parse_lipid(name):
             label = 'lipid'
@@ -43,7 +43,6 @@ label_class_byname
 
         gid_to_lab[g_id] = label
 
-
     # add the chem class label to the master table by g_id for any compounds that were matched
     qry = "UPDATE master SET chem_class_label=? WHERE g_id=?"
     for g_id in gid_to_lab:
@@ -51,8 +50,8 @@ label_class_byname
         cursor.execute(qry, qdata)
 
 
-
-if __name__ == '__main__':
+def main():
+    """ main execution sequence """
 
     from sqlite3 import connect
 
@@ -62,6 +61,8 @@ if __name__ == '__main__':
 
     print("adding (rough) chemical class labels ...")
     label_class_byname(cur)
+    print("... done")
+
     # save changes to the database
     con.commit()
     
