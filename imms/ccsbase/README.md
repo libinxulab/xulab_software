@@ -41,3 +41,54 @@ the current working directory, and if it already exists it will be overridden.
 
 <hr>
 
+### train_prediction_model
+This module contains a set of scripts that produce a CCS prediction model using the data in `C3S.db` for model 
+training. The model is constructed in the same general fashion as described in our 
+[original paper](https://pubs.acs.org/doi/10.1021/acs.analchem.9b05772), using K-means clustering for untargeted 
+classification of compounds into structurally related groups, then training separate SVR models on each of the 
+individual clustered data sets. 
+
+#### Usage
+Prediction model training reqiures the external libraries `numpy`, `matplotlib`, and `scikit-learn` to be installed.
+All of these libraries are installable via Python's built-in package manager, `pip`. Model training is performed by
+calling this module directly, with the path to the combined CCS database provided as an argument:
+
+```bash
+python3 -m train_prediction_model C3S.db
+```
+
+Model training can take a long time especially when using a lot of hyperparameter combinations, so it is best to do it 
+on a computer with a lot of CPU threads. After model training has been completed, several files will be produced in the 
+working directory:
+* `kmcm_svr_final_metrics.json` - CCS prediction performance metrics for training/test datasets
+* `kmcm_svr_final_metrics.png` - plot of the CCS prediction performance metrics for training/test datasets
+* `kmcm_svr_final.pickle`, `OHEncoder.pickle`, `LEncoder.pickle`, `SScaler.pickle`  - individual instances of the
+components of the prediction model, saved in Python's serialized binary format, these are all necessary for deployment
+of CCS prediction model to the website 
+
+There are some parameters that control aspects of model training which are defined in 
+`train_prediction_model/config.py`:
+```python
+# pRNG seed for deterministic results in stochastic steps (e.g., splitting training/test set data)
+seed = 1234
+
+# number of individual clusters to split the dataset into
+n_clusters = [5]
+
+# SVR hyperparameters C and gamma
+C = [100, 1000]
+gamma = [0.001, 0.01]
+```
+
+#### `C3SD`: an interface for manipulating data from `C3S.db`
+The `C3SD` object (defined in `train_prediction_model/C3SData/data.py`) provides an interface for manipulating data
+from the combined CCS database. Briefly, the object can construct a combined dataset from specified sources, compute
+features from MQNs stored in the database, perform encoding of MS adducts, center and scale feature data, and split
+into training/test data sets. This object can be used for further development of CCS prediction outside of the standard
+method described in the original paper. Detailed documentation is available directly from the module:
+
+```python
+from train_prediction_model.C3SData.data import C3SD
+help(C3SD)
+```
+
