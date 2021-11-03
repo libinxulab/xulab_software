@@ -92,3 +92,13 @@ from train_prediction_model.C3SData.data import C3SD
 help(C3SD)
 ```
 
+<hr>
+
+### `generate_pubchem_csv.py`
+This script takes the data from `C3S.db` and generates the two files that are needed for uploading the data to PubChem
+(`ccsbase_pubchem.csv` and `ccsbase_pubchem_substance.csv`). 
+
+#### Usage
+```bash
+python3 generate_pubchem_csv.py
+```
