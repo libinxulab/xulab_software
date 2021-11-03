@@ -39,6 +39,55 @@ As the build process proceeds, information about the build process is printed to
 to record this information for future reference (_e.g._ using `tee` as in the example above). `C3S.db` is produced in
 the current working directory, and if it already exists it will be overridden. 
 
+
+#### Adding new data to `C3S.db`
+Adding new datasets into the combined CCS database requires producing a cleaned dataset and adding the reference 
+information to `build_c3sdb/reference_info.py`. Cleaned source data must be saved in JSON format as in the following
+example, where each compound in the source dataset is represented as an object with several attributes (`name`, 
+`adduct`, `mz`, `ccs`, and optionally `smi`):
+```json
+[
+    {
+        "name": "2-Aminobenzothiazole",
+        "adduct": "[M+H]+",
+        "smi": "C1=CC=C2C(=C1)N=C(S2)N",
+        "mz": 151.0324,
+        "ccs": 128.6
+    },
+    {
+        "name": "2-Aminobenzothiazole",
+        "adduct": "[M-H]-",
+        "smi": "C1=CC=C2C(=C1)N=C(S2)N",
+        "mz": 149.0179,
+        "ccs": 122.71
+    }
+]
+```
+While the `smi` attribute is optional, it is good to include it if the information is present in the source dataset. 
+The file should saved as `build_c3sdb/cleaned_data/<src_tag>.json`, where `<src_tag>` is constructed as the first four 
+letters of the first author's last name and date of publication (MMYY), example: `belo0321`. After the cleaned dataset
+has been added into `build_c3sdb/cleaned_data/`, `build_c3sdb/reference_info.py` must be edited to include the 
+corresponding reference information and metadata for the dataset. The `info` variable defined in 
+`build_c3sdb/reference_info.py` is a `list` of `dict`s, one per dataset. Add an entry to the end of this list with the
+reference information and metadata for the new dataset in the following format:
+```python
+{
+    # first four letters of first author's last name and date of publication (MMYY)
+    "src_tag": "belo0321",  
+    # complete citation
+    "reference": "Belova, L. et al. Ion Mobility-High-Resolution Mass Spectrometry (IM-HRMS) for the Analysis of Contaminants of Emerging Concern (CECs): Database Compilation and Application to Urine Samples. Anal. Chem. XXX, XXXX-XXXX (2021)",
+    # link to publication
+    "link": "https://pubs.acs.org/doi/10.1021/acs.est.0c05713",
+    # type of CCS measurement (DT - drift tube, TW - traveling wave, TIMS - trapped IMS)
+    "ccs_type": "DT",
+    # method notes, including how CCS was calibrated (if applicable)
+    "ccs_method": "single field, calibrated"
+}
+```
+
+By default, all datasets defined in this `info` parameter are used in building `C3S.db`, however, if you are using an 
+explicit list, you will need to edit `build_c3sdb/fill_db_from_src.py` as described above to include the new dataset.
+
 <hr>
 
 ### train_prediction_model
