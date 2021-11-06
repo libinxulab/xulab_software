@@ -87,7 +87,7 @@ KMCMulti.predict
         return array([self.estimators_[self.kmeans_.predict(x.reshape(1, -1))[0]].predict(x.reshape(1, -1))[0] for x in X])
 
     
-def kmcm_p_grid(n_clusters, est_params):
+def kmcm_p_grid(n_clusters, est_params, permute):
     """
 kmcm_p_grid
     description:
@@ -96,6 +96,7 @@ kmcm_p_grid
         n_clusters (list(int)) -- list of values to try for n_clusters
         est_params (dict(str:list(...))) -- values to try for individual estimator parameters, in
                                             the style of the parameter grid used for GridSearchCV
+        permute (bool) -- whether to permute the estimator parameters for each cluster
     returns:
         (list(dict(...))) -- parameter grid for use with GridSearchCV
 """
@@ -104,13 +105,17 @@ kmcm_p_grid
     keys, values = zip(*est_params.items())
     for v in product(*values):
         perms.append(dict(zip(keys, v)))
- 
-    # parameter grid
+
+    # paramter grid
     pg = []
-    for nc in n_clusters: 
-        n_perms = [perms for _ in range(nc)]
-        pg.append({'n_clusters': [nc], 'estimator_params': [list(_) for _ in product(*n_perms)]})             
-    
+    if permute:
+        for nc in n_clusters: 
+            n_perms = [perms for _ in range(nc)]
+            pg.append({'n_clusters': [nc], 'estimator_params': [list(_) for _ in product(*n_perms)]})             
+    else:
+        for nc in n_clusters:
+            pg.append({'n_clusters': [nc], 'estimator_params': [[perm for _ in range(nc)] for perm in perms]})
+
     return pg
     
 

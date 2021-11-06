@@ -95,7 +95,8 @@ This module contains a set of scripts that produce a CCS prediction model using 
 training. The model is constructed in the same general fashion as described in our 
 [original paper](https://pubs.acs.org/doi/10.1021/acs.analchem.9b05772), using K-means clustering for untargeted 
 classification of compounds into structurally related groups, then training separate SVR models on each of the 
-individual clustered data sets. 
+individual clustered data sets. After model training, the database is updated with predicted CCS values (stored in the
+`predicted` table).
 
 #### Usage
 Prediction model training reqiures the external libraries `numpy`, `matplotlib`, and `scikit-learn` to be installed.

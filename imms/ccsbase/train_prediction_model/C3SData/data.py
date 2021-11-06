@@ -34,8 +34,9 @@ C3SD.__init__
         The database path and pRNG seed are stored in instance variables, respectively:
             self.db_path_
             self.seed_
-        The compound names, m/z, MS adduct, CCS, dataset source, SMILES structures, MQNs, and (rough) class labels are 
-        all fetched and stored as numpy.ndarray in instance variables, respectively: 
+        The g_ids, compound names, m/z, MS adduct, CCS, dataset source, SMILES structures, MQNs, and (rough) class 
+        labels are all fetched and stored as numpy.ndarray in instance variables, respectively: 
+            self.g_id_
             self.cmpd_
             self.mz_ 
             self.adduct_
@@ -82,13 +83,13 @@ C3SD.__init__
         # fetch data from the database
         if type(datasets) == str:
             # fetch a single dataset
-            self.cmpd_, self.mz_, self.adduct_, self.ccs_, self.src_, self.smi_, self.mqn_, self.cls_lab_ = fetch_single_dset(self.db_path_, datasets) 
+            self.g_id_, self.cmpd_, self.mz_, self.adduct_, self.ccs_, self.src_, self.smi_, self.mqn_, self.cls_lab_ = fetch_single_dset(self.db_path_, datasets) 
             self.datasets_ = datasets
         elif type(datasets) == list:
             if not datasets:
                 datasets = all_dset(self.db_path_)
             # fetch either a subset of datasets or all datasets
-            self.cmpd_, self.mz_, self.adduct_, self.ccs_, self.src_, self.smi_, self.mqn_, self.cls_lab_ = fetch_multi_dset(self.db_path_, datasets)
+            self.g_id_, self.cmpd_, self.mz_, self.adduct_, self.ccs_, self.src_, self.smi_, self.mqn_, self.cls_lab_ = fetch_multi_dset(self.db_path_, datasets)
             self.datasets_ = [C3SD(self.db_path_, datasets=dset, seed=self.seed_) for dset in datasets]
         # total number of compounds
         self.N_ = self.cmpd_.shape[0]
@@ -144,7 +145,7 @@ C3SD.featurize
             # convert any adduct that is not among the top common adducts to a single label: 'other' 
             self.LEncoder_ = LabelEncoder()
             le_adducts = self.LEncoder_.fit_transform(self.filter_common_adducts(self.adduct_))
-            self.OHEncoder_ = OneHotEncoder(sparse=False, categories='auto')
+            self.OHEncoder_ = OneHotEncoder(sparse=False)
             ohe_adducts = self.OHEncoder_.fit_transform(le_adducts.reshape(-1, 1)).T
         use_mqns = None
         if mqn_indices:

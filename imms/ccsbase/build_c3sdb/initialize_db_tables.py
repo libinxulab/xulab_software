@@ -64,8 +64,8 @@ CREATE TABLE mqns (
 # table for predicted CCS values
 predicted_schema = """
 CREATE TABLE predicted (
-    -- global unique integer identifier (same as in master, increment past highest value in master for new predictions)
-    g_id TEXT UNIQUE NOT NULL,
+    -- global unique integer identifier (same as in master, NULL if not present in master)
+    g_id TEXT UNIQUE,
     -- compound name
     name TEXT NOT NULL,
     -- MS adduct
@@ -75,9 +75,9 @@ CREATE TABLE predicted (
     pred_ccs REAL NOT NULL,
     -- neutral smiles structure
     smi TEXT NOT NULL,
-    -- class label from untargeted classification step (if used)
+    -- class label from untargeted classification step (if used, NULL if not)
     class_label INTEGER,
-    -- CCS error relative to reference value in master table (if available)
+    -- CCS error relative to reference value in master table (if available, NULL if not)
     pred_error REAL,
     -- timestamp (YYMMDDHHmmss) of when prediction was added to the database, NULL for original reference data
     t_stamp INTEGER

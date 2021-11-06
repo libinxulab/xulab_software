@@ -16,10 +16,11 @@ import json
 from matplotlib import rcParams
 from numpy import mean, median, abs, sum, cumsum, histogram, sqrt
 import sys
+from sqlite3 import connect
 
 from .C3SData.data import C3SD
 from .kmcm import KMCMulti, kmcm_p_grid
-from .config import seed, n_clusters, C, gamma
+from .config import seed, gs_n_jobs, n_clusters, C, gamma, hyperparam_permute
 
 
 # set the font size for plots
@@ -123,14 +124,36 @@ summary_figure
     plt.savefig('kmcm_svr_final_metrics.png', dpi=400, bbox_inches='tight')
 
 
+def add_predicted_ccs(model, data, cur):
+    """ adds predicted CCS to the predicted table in C3S.db """
+    # clear out the predicted table if there are already values in it
+    cur.execute("""DELETE FROM predicted""")
+
+    # retrieve attributes that are already stored in the C3SD instance
+    gids, names, mzs, adducts, smis = data.g_id_, data.cmpd_, data.mz_, data.adduct_, data.smi_
+
+    # generate predicted CCS, class labels, and prediction errors for each compound
+    Xss = data.SScaler_.transform(data.X_)
+    pred_ccss = model.predict(Xss)
+    pred_errors = pred_ccss - data.y_
+    class_labels = model.kmeans_.predict(Xss)
+
+    qry = """INSERT INTO predicted VALUES (?,?,?,?,?,?,?,?,?)"""
+    for gid, name, adduct, mz, pred_ccs, smi, class_label, pred_error in zip(gids, names, adducts, mzs, pred_ccss, 
+                                                                             smis, class_labels, pred_errors):
+        qdata = (gid, name, adduct, mz, pred_ccs, smi, int(class_label), pred_error, None)
+        cur.execute(qry, qdata)
+
+
 def main(db_path):
     data = C3SD(db_path, seed=seed)
     data.featurize()
     data.train_test_split('ccs')
     data.center_and_scale()
-    kmcm_svr_p_grid = kmcm_p_grid(n_clusters, {'C': C, 'gamma': gamma})
-    kmcm_svr_gs = GridSearchCV(KMCMulti(seed=seed, use_estimator=SVR(cache_size=2048, tol=5e-4)),
-                               param_grid=kmcm_svr_p_grid, n_jobs=-1, cv=5, scoring='neg_mean_squared_error')
+    kmcm_svr_p_grid = kmcm_p_grid(n_clusters, {'C': C, 'gamma': gamma}, permute=hyperparam_permute)
+
+    kmcm_svr_gs = GridSearchCV(KMCMulti(seed=seed, use_estimator=SVR(cache_size=1024, tol=5e-4)),
+                               param_grid=kmcm_svr_p_grid, n_jobs=gs_n_jobs, cv=5, scoring='neg_mean_squared_error', verbose=3)
     kmcm_svr_gs.fit(data.X_train_ss_, data.y_train_)
     kmcm_svr_best = kmcm_svr_gs.best_estimator_
     print(kmcm_svr_gs.best_params_)
@@ -150,6 +173,13 @@ def main(db_path):
         pickle.dump(data.OHEncoder_, ohe)
         pickle.dump(data.LEncoder_, le)
         pickle.dump(data.SScaler_, ss)
+
+    # add predicted CCS values to predicted table in database
+    con = connect('C3S.db')
+    cur = con.cursor()
+    add_predicted_ccs(kmcm_svr_best, data, cur)
+    con.commit()
+    con.close()
 
 
 if __name__ == '__main__':

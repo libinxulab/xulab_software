@@ -35,7 +35,7 @@ def fetch_single_dset(db_path, src_tag):
     """
 fetch_single_dset
     description:
-        fetch name, mz, adduct, ccs, src_tag, smi, and chem_class_label for a dataset based on the provided src_tag
+        fetch g_id, name, mz, adduct, ccs, src_tag, smi, and chem_class_label for a dataset based on the provided src_tag
     parameters:
         db_path (str) -- path to C3S.db database file
         src_tag (str) -- specify the source dataset
@@ -47,8 +47,9 @@ fetch_single_dset
     qryA = 'SELECT g_id, name, mz, adduct, ccs, src_tag, smi, chem_class_label FROM master WHERE src_tag="{}"'.format(src_tag) + \
           ' AND smi IS NOT NULL AND g_id IN (SELECT g_id FROM mqns)'
     qryB = 'SELECT mqns.* FROM mqns INNER JOIN master ON mqns.g_id=master.g_id WHERE master.src_tag="{}"'.format(src_tag)
-    names, mzs, adducts, ccss, srcs, smis, cls_labs = [], [], [], [], [], [], []
-    for _, name, mz, adduct, ccs, src, smi, cls_lab in cur.execute(qryA).fetchall():
+    gids, names, mzs, adducts, ccss, srcs, smis, cls_labs = [], [], [], [], [], [], [], []
+    for gid, name, mz, adduct, ccs, src, smi, cls_lab in cur.execute(qryA).fetchall():
+        gids.append(gid)
         names.append(name)
         mzs.append(mz)
         adducts.append(adduct)
@@ -62,14 +63,14 @@ fetch_single_dset
         mqns.append(mqn)
     con.close()
     # self.cmpd_, self.mz_, self.adduct_, self.ccs_, self.src_, self.smi_
-    return array(names), array(mzs), array(adducts), array(ccss), array(srcs), array(smis), array(mqns), array(cls_labs)
+    return array(gids), array(names), array(mzs), array(adducts), array(ccss), array(srcs), array(smis), array(mqns), array(cls_labs)
 
 
 def fetch_multi_dset(db_path, src_tags):
     """
 fetch_multi_dset
     description:
-        fetch name, mz, adduct, ccs, src_tag, smi and chem_class_label for a dataset based on the provided list of 
+        fetch g_id, name, mz, adduct, ccs, src_tag, smi and chem_class_label for a dataset based on the provided list of 
         src_tags. 
         * Internally, this function does not use multiple calls to fetch_single_dset, rather, it structures a 
         single SQL query to fetch all of the data at once for sake of efficiency. *
@@ -88,8 +89,9 @@ fetch_multi_dset
         qryB += '"{}",'.format(tag)
     qryA = qryA.rstrip(',') + ') AND smi IS NOT NULL AND g_id IN (SELECT g_id FROM mqns)'
     qryB = qryB.rstrip(',') + ')'
-    names, mzs, adducts, ccss, srcs, smis, cls_labs = [], [], [], [], [], [], []
-    for _, name, mz, adduct, ccs, src, smi, cls_lab in cur.execute(qryA).fetchall():
+    gids, names, mzs, adducts, ccss, srcs, smis, cls_labs = [], [], [], [], [], [], [], []
+    for gid, name, mz, adduct, ccs, src, smi, cls_lab in cur.execute(qryA).fetchall():
+        gids.append(gid)
         names.append(name)
         mzs.append(mz)
         adducts.append(adduct)
@@ -103,7 +105,7 @@ fetch_multi_dset
         mqns.append(mqn)
     con.close()
     # self.cmpd_, self.mz_, self.adduct_, self.ccs_, self.src_, self.smi_, self.mqn_
-    return array(names), array(mzs), array(adducts), array(ccss), array(srcs), array(smis), array(mqns), array(cls_labs)
+    return array(gids), array(names), array(mzs), array(adducts), array(ccss), array(srcs), array(smis), array(mqns), array(cls_labs)
 
 
 
