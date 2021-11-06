@@ -273,10 +273,12 @@ CCSCalibrationRaw.__init__
 """
         # make sure no_init was not set
         if not no_init:
-
+            if type(raw) == str:
+                # for single raw file and mass/ccs list, convert to lists with those single values then proceed
+                raw, masses, ccss = [raw], [masses], [ccss]
             # iterate through the raw file and mass list combinations
             # and store detailed information on each calibrant
-            raws, dts, atds, gauss_params = [], [], [], []
+            raws, dts, atds, gauss_params, masses2, ccss2 = [], [], [], [], [], []
             for raw_, masses_, ccss_ in zip(raw, masses, ccss):
                 print("processing {} for masses: {}".format(raw_, masses_))
                 reader = MassLynxReader(raw_)
@@ -295,9 +297,11 @@ CCSCalibrationRaw.__init__
                     raws.append(raw)
                     atds.append((drift_time, intensity))
                     gauss_params.append((A, B, C))
+                    masses2.append(mass)
+                    ccss2.append(mass)
 
             # create calibration using superclass __init__
-            super().__init__(masses, dts, ccss, charge=charge)
+            super().__init__(masses2, dts, ccss2, charge=charge)
 
             # add calibrant metadata from drift time extraction to self.calibrants
             for calibrant, raw, atd, gp in zip(self.calibrants, raws, atds, gauss_params):
@@ -395,7 +399,7 @@ CCSCalibrationRawXL.__init__
                                 sheet names [optional, default=""]
 """
         # load the excel file
-        xl = read_excel(xlsx, sheet_name=None, index_col=None, header=0)
+        xl = read_excel(xlsx, sheet_name=None, index_col=None, header=None)
         # get the path to the raw files (same directory as input xlsx, OR specified in path_prefix)
         if not path_prefix:
             raw_dir = os.path.split(xlsx)[0]

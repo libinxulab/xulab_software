@@ -196,8 +196,6 @@ cal_polyala_3reps = CCSCalibrationRaw(['polyala_rep1.raw', 'polyala_rep2.raw', '
 files, and each sheet contains calibrant m/z and reference CCS values
 * [`mass_window` (`float`)] - mass tolerance [optional, default=`0.05`]
 * [`dt_func` (`int`)] - the MS function containing drift time data [optional, default=`1`]
-* [`no_init` (`bool`)] - do not perform any initialization, just make a blank CCSCalibrationRaw instance [optional, 
-default=`False`]
 * [`charge` (`float`)] - charge state [optional, default=`1.`]
 * [`path_prefix` (`str`)] - prefix to prepend to paths to data files, default behavior is to look in the same 
 directory as the input xlsx file if no `path_prefix` is provided [optional, default=`""`]
