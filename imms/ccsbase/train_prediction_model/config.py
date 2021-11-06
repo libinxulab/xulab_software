@@ -8,9 +8,14 @@
 # pRNG seed for deterministic results in stochastic steps (e.g., splitting training/test set data)
 seed = 1234
 
-# number of individual clusters to split the dataset into
-n_clusters = [5]
+# GridSearch number of jobs
+gs_n_jobs = 10
 
-# SVR hyperparameters C and gamma
-C = [100, 1000]
-gamma = [0.001, 0.01]
+# number of individual clusters to split the dataset into
+n_clusters = [4, 5]
+
+# SVR hyperparameters C and gamma, and whether to permute them for each cluster
+C = [1e3, 1e5]
+gamma = [1e-3, 1e-1]
+hyperparam_permute = True
+

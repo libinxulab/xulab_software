@@ -145,7 +145,7 @@ C3SD.featurize
             # convert any adduct that is not among the top common adducts to a single label: 'other' 
             self.LEncoder_ = LabelEncoder()
             le_adducts = self.LEncoder_.fit_transform(self.filter_common_adducts(self.adduct_))
-            self.OHEncoder_ = OneHotEncoder(sparse=False, categories='auto')
+            self.OHEncoder_ = OneHotEncoder(sparse=False)
             ohe_adducts = self.OHEncoder_.fit_transform(le_adducts.reshape(-1, 1)).T
         use_mqns = None
         if mqn_indices:

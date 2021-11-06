@@ -20,7 +20,7 @@ from sqlite3 import connect
 
 from .C3SData.data import C3SD
 from .kmcm import KMCMulti, kmcm_p_grid
-from .config import seed, n_clusters, C, gamma
+from .config import seed, gs_n_jobs, n_clusters, C, gamma, hyperparam_permute
 
 
 # set the font size for plots
@@ -141,7 +141,7 @@ def add_predicted_ccs(model, data, cur):
     qry = """INSERT INTO predicted VALUES (?,?,?,?,?,?,?,?,?)"""
     for gid, name, adduct, mz, pred_ccs, smi, class_label, pred_error in zip(gids, names, adducts, mzs, pred_ccss, 
                                                                              smis, class_labels, pred_errors):
-        qdata = (gid, name, adduct, mz, pred_ccs, smi, class_label, pred_error, None)
+        qdata = (gid, name, adduct, mz, pred_ccs, smi, int(class_label), pred_error, None)
         cur.execute(qry, qdata)
 
 
@@ -150,9 +150,10 @@ def main(db_path):
     data.featurize()
     data.train_test_split('ccs')
     data.center_and_scale()
-    kmcm_svr_p_grid = kmcm_p_grid(n_clusters, {'C': C, 'gamma': gamma})
-    kmcm_svr_gs = GridSearchCV(KMCMulti(seed=seed, use_estimator=SVR(cache_size=2048, tol=5e-4)),
-                               param_grid=kmcm_svr_p_grid, n_jobs=-1, cv=5, scoring='neg_mean_squared_error', verbose=3)
+    kmcm_svr_p_grid = kmcm_p_grid(n_clusters, {'C': C, 'gamma': gamma}, permute=hyperparam_permute)
+
+    kmcm_svr_gs = GridSearchCV(KMCMulti(seed=seed, use_estimator=SVR(cache_size=1024, tol=5e-4)),
+                               param_grid=kmcm_svr_p_grid, n_jobs=gs_n_jobs, cv=5, scoring='neg_mean_squared_error', verbose=3)
     kmcm_svr_gs.fit(data.X_train_ss_, data.y_train_)
     kmcm_svr_best = kmcm_svr_gs.best_estimator_
     print(kmcm_svr_gs.best_params_)
