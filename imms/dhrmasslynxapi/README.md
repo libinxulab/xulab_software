@@ -3,7 +3,7 @@
 This Python package is a wrapper around the MassLynx API from Waters, and is used for extracting data from 
 Waters .raw files. There is also a module for performing CCS calibration. This Package requires the original Waters
 sdk files to be copied into the `sdk/` directory, which are not included in this repository but can be obtained from
-the lab RAID storage (under `resources/masslynx_sdk/`):
+the lab NAS (under `lab_resources/masslynx_sdk_files/`):
 * `cdt.dll`
 * `MassLynxLockMassProcessor.py`
 * `MassLynxParameters.py`
@@ -112,16 +112,42 @@ m, i = rdr.get_spectrum(1, 1.2, 2.3, dt_min=3.4, dt_max=4.5)
 
 
 ## `dhrmasslynxapi.ccs_calibration`
-This module defines two objects, `CCSCalibrationRaw` and `CCSCalibrationRAWXL`, 
+This module defines three objects `CCSCalibrationList`, `CCSCalibrationRaw` and `CCSCalibrationRAWXL`. Upon 
+initialization, these objects construct a CCS calibration curve (using calibrant data provided either in the form of 
+lists or extracted automatically from raw data files). After initialization, calibrated CCS values can be obtained for
+mass and drift time combinations using the `calibrated_ccs` method. 
 
 
 ### Initialization
-The CCS calibration object can be initialized using either the path to .raw data file(s) and a list of masses and 
+The basic CCS calibration object (`CCSCalibrationList`) can be initialized using lists of masses, extracted drift 
+times, and reference CCS values for all calibrants. 
+CCS calibration objects can also be initialized using either the path to .raw data file(s) and a list of masses and 
 reference CCS values for CCS calibrants (`CCSCalibrationRaw`) or using the path to an excel spreadsheet containing the 
 same information (`CCSCalibrationRawXL`). Both CCS calibration objects can be set to extract calibrant data from one 
 data file or multiple data files. When the CCS calibration object is initialized, it automatically extracts the drift
 times from calibrant data file(s), then fits a CCS calibration curve using the reference m/z and CCS values and
 these fitted drift times. 
+
+
+##### Parameters (`CCSCalibrationList`)
+* `masses` (`list(float)`) - m/z for calibrants
+* `dts` (`list(float)`) - drift times for calibrants
+* `ccss` (`list(float)`) - reference CCS for calibrants
+* [`charge` (`float`)] - charge state [optional, default=`1.`] 
+
+##### Example (`CCSCalibrationList`)
+```python
+from dhrmasslynxapi.ccs_calibration import CCSCalibrationList
+
+# m/z, drift time, and reference CCS values for polyalanine CCS calibrants
+polyala_mz = [123.4567, 234.5678, ...]
+polyala_dt = [12.3, 23.4, ...]
+polyala_ccs = [123.4567, 234.5678, ...]
+
+cal_polyala = CCSCalibrationList(polyala_mz, polyala_dt, polyala_ccs)
+
+```
+
 
 ##### Parameters (`CCSCalibrationRaw`)
 * `raw` (`str` or `list(str)`) - single data file (str) or multiple data files(list(str)) to extract data from
@@ -170,8 +196,6 @@ cal_polyala_3reps = CCSCalibrationRaw(['polyala_rep1.raw', 'polyala_rep2.raw', '
 files, and each sheet contains calibrant m/z and reference CCS values
 * [`mass_window` (`float`)] - mass tolerance [optional, default=`0.05`]
 * [`dt_func` (`int`)] - the MS function containing drift time data [optional, default=`1`]
-* [`no_init` (`bool`)] - do not perform any initialization, just make a blank CCSCalibrationRaw instance [optional, 
-default=`False`]
 * [`charge` (`float`)] - charge state [optional, default=`1.`]
 * [`path_prefix` (`str`)] - prefix to prepend to paths to data files, default behavior is to look in the same 
 directory as the input xlsx file if no `path_prefix` is provided [optional, default=`""`]
@@ -192,3 +216,29 @@ calibrant data from multiple data files, add corresponding sheets for each data 
 calibrant information. The first column in each sheet is the calibrant m/z and the second is the literature CCS, there
 should be no headers_
 
+
+### `calibrated_ccs`
+This is the primary method to use after initializing a CCS calibration object. Takes m/z and drift time as input and
+returns a calibrated CCS value based on the calibration curve established during initialization. This is the same for
+`CCSCalibrationList`, `CCSCaibrationRaw`, and `CCSCalibrationRawXL` subclasses.
+
+##### Parameters
+* `mass` (`float`) - m/z
+* `dt` (`float`) - drift time
+
+#### Returns
+* `ccs` (`float`) - calibrated ccs
+
+##### Example
+```python
+# cal is an initialized instance of CCSCalibrationList, CCSCalibrationRaw, or CCSCalibrationRawXL
+
+# get a single calibrated CCS value
+ccs = cal.calibrated_ccs(234.5678, 3.45)
+
+# get calibrated CCS values for a list of unknown m/zs and drift times
+unknown_mzs = [123.4567, 234.5678, ...]
+unknown_dts = [1.23, 2.34, ...]
+unknown_ccss = [cal.calibrated_ccs(mz, dt) for mz, dt in zip(unknown_mzs, unknown_dts)]
+
+```
