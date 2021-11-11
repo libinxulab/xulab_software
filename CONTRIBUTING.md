@@ -115,7 +115,7 @@ Computes the abundance of a single feature from a MS image
 <hr>
 
 
-Finally, we need to link to the utility-level documentation from the top-level `README.md` by adding an entry under the
+Next, we need to link to the utility-level documentation from the top-level `README.md` by adding an entry under the
 `imms/` section as follows:
 ```markdown
 * __imms/__
@@ -128,4 +128,6 @@ Finally, we need to link to the utility-level documentation from the top-level `
 *In this example we also list the individual scripts below the link to the utility-level documentation because this 
 utility is comprised of two standalone scripts, rather than a larger or more complex module like `dhrmasslynxapi`.*
 
+Finally, we can commit all of the changes to our `add_maldi_imaging_scripts` branch, and when we are satisfied with the 
+state of the code and documentation we can create a pull request to add those changes into the `main` branch. 
  
