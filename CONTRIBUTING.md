@@ -122,6 +122,10 @@ Finally, we need to link to the utility-level documentation from the top-level `
   * [dhrmasslynxapi](imms/dhrmasslynxapi/README.md)
   * [ccsbase](imms/ccsbase/README.md)
   * [maldi_imaging](imms/maldi_imaging/README.md)
+    * `align_slices.py`
+    * `single_feature_abundance.py`
 ```
+*In this example we also list the individual scripts below the link to the utility-level documentation because this 
+utility is comprised of two standalone scripts, rather than a larger or more complex module like `dhrmasslynxapi`.*
 
  
