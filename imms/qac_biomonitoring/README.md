@@ -75,6 +75,7 @@ if __name == "__main__":
 * Excel .xlsx spreadsheet containing filtered spectral features unique to sample files (relative to control files, see `filter.py` below)
 * Folder ("Extracted Mobilograms") containing .png images of extracted and fitted mobilograms
 * Folder ("Extracted Chromatograms") containing .png images of extracted (raw), smoothed, and fitted LC chromatograms
+* CCS calibration curve (.png) displaying randomly distributed fit residuals
 
 ### Notes
 The current version of `process.py` utilizes multiple hardset parameters for interfacing with Waters .raw files. These parameters include MS function number(*e.g.* LC, IM) and desired mass tolerance around the target m/z. In order to override these parameters, the following line of code within `process.py` can be directly manipulated:
@@ -87,7 +88,9 @@ t, dt_i = rdr.get_chrom(2, float(mz), 0.01)
 # Extract m/z-selected EIC from MS function 1 for target m/z +/- 0.01
 rt, rt_i = rdr.get_chrom(1, float(mz), 0.01)
 ```
-Additionally, `process.py` utilizes two hardset filters to remove low intensity and/or poorly shaped extracted mobilograms (based on full width at half maximum, FWHM). These two parameters may be overriden by directly manipulating the following lines of code:
+Note that in the first case, where a mobilogram is being extracted from the Waters .raw file, **the indicated MS function must contain mobility data.** 
+
+Additionally, `process.py` utilizes two hardset filters to remove low intensity and/or poorly shaped extracted mobilograms/ATDs (based on full width at half maximum, FWHM). These two parameters may be overriden by directly manipulating the following lines of code:
 ```python
 # Apply shape (0.01 ms < FWHM < 3 ms) and intensity (> 1000) thresholds on extracted mobilogram
 ...
@@ -214,6 +217,20 @@ There are multiple hardset parameters within the current version of `query.py` t
 ```python
 # Set the default parameters to +/- 0.01 Da, +/- 0.1s, and +/- 1% for CCS, respectively
 c.execute('''SELECT DISTINCT compound_name FROM qacs_rt_ccs WHERE exact_mz BETWEEN ? AND ? AND rt BETWEEN ? AND ? AND average_ccs BETWEEN ? AND ? AND gradient = ? AND ccs_calibrant = ? AND column_type = ?''', (mz - 0.01, mz + 0.01, rt - 0.1, rt + 0.1, ccs * 0.99, ccs * 1.01, gradient, ccs_calibrant, column_type))
+```
+If the user selections option **5**, the script will automatically extract MS/MS spectra from the list of Waters .raw files. This process occurs on the basis of *either* rt and dt (if both parameters are available), or only rt (if a dt value could not be extracted from the data). The default settings for extraction are hardset at +/1 0.01s and +/1 0.1 ms around the extracted spectral feature for rt and dt, respectively. These parameters may be changed by directly manipulating the following lines of code within `query.py`:
+```python
+# Extract MS/MS spectrum for the experimental spectral feature with potential matches
+# Set rt parameters at +/- 0.1s and dt parameters at +/- 0.5 ms
+m, i = rdr.get_spectrum(1, rt - 0.1, rt + 0.1, dt_min = dt - 0.5, dt_max = dt + 0.5)
+```
+
+The current version of `query.py` also utilizes a m/z tolerance of 0.025 Da when calculating the cosine similarity score between experimental (extracted) and reference spectra. If extracted and reference m/z values are within 0.025 Da of each other, they are appended to their respective vectors and subsequently contribute to the overall similarity score between the two spectra. This threshold may be changed by directly manipulating the following line of code within `query.py`:
+```python
+# Change the m/z tolerance between extracted and reference to 0.01 Da
+...	
+	if np.abs(reference_mz[i] - extracted_mz[j]) < 0.01:
+		...
 ```
 
 
