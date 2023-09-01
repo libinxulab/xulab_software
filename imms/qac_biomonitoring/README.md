@@ -16,6 +16,7 @@ These Python scripts are intended to facilitate the integration of IM-MS/MS into
 The root directory should contain the following Python files and folders:
 * `dhrmasslynxapi` 
 * `process.py`
+* `process_dt_filter.py`
 * `multigauss.py`
 * `filter.py`
 * `query.py`
@@ -27,10 +28,12 @@ The root directory should contain the following Python files and folders:
 
 ## `process.py`
 This script extracts the following spectral features from batches of Waters .raw files based on a list of target m/z values: 
-* retention times (rt)
-* LC chromatogram peak areas
 * drift times (dt)
 * calibrated collision cross section (CCS) values
+* retention times (rt)
+* LC ion chromatogram peak areas
+
+**Note that `process.py` is intended to be used for independently extracting rt and dt, solely based on a target m/z value; if the user wishes to extract dt values using an appropriate rt filter, then `process_rt_filter.py` should be utilized instead.**  
 
 ### Dependencies
 1. `pandas`
@@ -74,18 +77,18 @@ if __name == "__main__":
 * Excel .xlsx spreadsheet containing all extracted spectral features
 * Excel .xlsx spreadsheet containing filtered spectral features unique to sample files (relative to control files, see `filter.py` below)
 * Folder ("Extracted Mobilograms") containing .png images of extracted and fitted mobilograms
-* Folder ("Extracted Chromatograms") containing .png images of extracted (raw), smoothed, and fitted LC chromatograms
+* Folder ("Extracted Chromatograms") containing .png images of extracted (raw), smoothed, and fitted LC ion chromatograms
 * CCS calibration curve (.png) displaying randomly distributed fit residuals
 
 ### Notes
 The current version of `process.py` utilizes multiple hardset parameters for interfacing with Waters .raw files. These parameters include MS function number(*e.g.* LC, IM) and desired mass tolerance around the target m/z. In order to override these parameters, the following line of code within `process.py` can be directly manipulated:
 ```python
-# Extract mobilogram from MS function 2 for target m/z +/- 0.01
+# Extract mobilogram from MS function 2 for target m/z +/- 0.01 Da
 rdr = MassLynxReader(file_name)
 mz = float(mz)
 t, dt_i = rdr.get_chrom(2, float(mz), 0.01)
 
-# Extract m/z-selected EIC from MS function 1 for target m/z +/- 0.01
+# Extract m/z-selected EIC from MS function 1 for target m/z +/- 0.01 Da
 rt, rt_i = rdr.get_chrom(1, float(mz), 0.01)
 ```
 Note that in the first case, where a mobilogram is being extracted from the Waters .raw file, **the indicated MS function must contain mobility data.** 
@@ -96,6 +99,16 @@ Additionally, `process.py` utilizes two hardset filters to remove low intensity 
 ...
 if not (fwhm < 3 and fwhm > 0.01 and max(dt_i) > 1000): 
 	...
+```
+## `process_rt_filter.py`
+This script returns the same spectral features as `process.py` but implements an appropriate rt filter for extacting dt values. The same dependencies and Excel spreadsheets as described above are required to utilize `process_rt_filter.py`. 
+
+This script is primarily intended to be used if the sample being processed is known or expected to contain complex mixtures of target compounds (*i.e.* human samples) with similar or identical m/z values. For example, if a sample contains two (or more) compounds that have m/z values within the input m/z tolerance window, the extracted LC ion chromatogram will contain multiple spectral features. Each of these spectral features presumably has their own dt and corresponding CCS value. The implementation of an appropriate rt filter is therefore necessary to distinguish spectral features that contain similar or identical m/z values; `process_rt_filter.py` does so by utilizing the `get_filtered_chrom` function within `dhrmasslynxapi`:
+```python
+# Extract mobilogram from MS function 1 for target m/z +/- 0.025 Da AND rt +/- 0.1 min of identified peak in extracted LC ion chromatogram
+...
+	t, dt_i = rdr.get_filtered_chrom(1, float(mz), 0.025, rt_min=float(rt_value)-0.1, rt_max=float(rt_value)+0.1)
+		...
 ```
 
 ## `filter.py`
@@ -131,7 +144,7 @@ The `multigauss.py` script provides functionality for processing and analyzing L
 * Folder ("Extracted Chromatograms") containing .png images of extracted (raw), smoothed, and fitted LC chromatograms
 
 ### Notes
-While `multigauss.py` is intended to be imported and utilized within `process.py`, it may also be directly executed by manually inputing raw chromatographic data:
+While `multigauss.py` is intended to be imported and utilized within `process.py` or `process_rt_filter.py`, it may also be directly executed by manually inputing raw chromatographic data:
 ```python
 from multigauss import process_data
 
@@ -152,7 +165,7 @@ peak_indices, rt_list, areas = process_data(rt, rt_i, file_name, mz, sample_type
 
 This code will smooth and fit the raw chromatographic data and return **(1)** the indices of identified peaks, **(2)** their rt, and **(3)** their peak areas.
 
-There are several parameters within the current  version of `multigauss.py` that are hardset when imported and utilized within `process.py`. For instance, the `find_peaks` module utilized to identify peaks within the smoothed data may be further optimized based on the characteristics of the input chromatographic data:
+There are several parameters within the current  version of `multigauss.py` that are hardset when imported and utilized within `process.py` and 'process_rt_filter.py`. For instance, the `find_peaks` module utilized to identify peaks within the smoothed data may be further optimized based on the characteristics of the input chromatographic data:
 ```python
 # Adjust parameters to identify peaks within the smoothed chromatographic data
 peak_indices, _ = find_peaks(smoothed_intensity, prominence = "", distance = "", width = "", height = "")
@@ -173,7 +186,7 @@ This script interfaces with the QACs Database for the purpose of querying and an
 * `qacs.db`, `qacs_experimental_msms.db`, and `qacs_theoretical_msms.db` (within the root directory, see below)
 
 ### Usages
-The current version of `query.py` is specifically designed to accept filtered lists of spectral features, *i.e.* the output spreadsheet produced by `process.py`. If a list is obtained by other methods, the input spreadsheet must be reformmated to have the following structure:
+The current version of `query.py` is specifically designed to accept filtered lists of spectral features, *i.e.* the output spreadsheet produced by `process.py` and/or `process_rt_filter.py`. If a list is obtained by other methods, the input spreadsheet must be reformmated to have the following structure:
 1. **file_name**: List of all the Waters .raw files to be processed
 2. **mz**: List of all the target m/z values used to extract spectral features
 3. **sample_type**: Indicate whether the Waters .raw file is a "control" or a "sample" 
