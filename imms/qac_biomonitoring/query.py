@@ -14,7 +14,7 @@ if not os.path.exists(spectra_directory):
     os.makedirs(spectra_directory)
 
 # Enter path to the Excel spreadsheet containing processed and filtered data
-input_file = "2023_07_28_RO1_feces_30B_90B_filtered.xlsx"
+input_file = "2023_07_27_RO1_pooled_feces_30B_90B_filtered.xlsx"
 
 # Mapping numbers to matching criteria for user input
 matching_criteria_dict = {
@@ -65,9 +65,6 @@ c_msms = conn_msms.cursor()
 conn_theoretical_msms = sqlite3.connect("qacs_theoretical_msms.db")
 c_theoretical_msms = conn_theoretical_msms.cursor()
 
-# Set m/z tolerance for peak alignment and matching
-mz_tolerance = 0.025
-
 # Filter peaks based on their intensity relative to the base peak 
 def filter_peaks_by_intensity(peaks, base_peak_intensity, threshold_percentage):
     threshold_intensity = base_peak_intensity * threshold_percentage / 100
@@ -76,33 +73,55 @@ def filter_peaks_by_intensity(peaks, base_peak_intensity, threshold_percentage):
 # Calculate the closeness of the m/z match within the tolerance window
 def calculate_closeness(extracted_mz, reference_mz, tolerance):
     difference = abs(extracted_mz - reference_mz)
-    closeness = max(0, 1 - difference / tolerance)
+    # Calculate closeness as a ratio of the difference to the tolerance
+    closeness = max(0, 1 - difference / tolerance) 
     return closeness 
 
 # Calculate the weighted intensity using the closeness of the m/z match
 def calculate_weighted_intensity_function(mz, intensity, closeness):
-    weighting_factor = 0.1 + 0.9 * closeness 
-    return (mz * 2) * (intensity ** 0.5) * weighting_factor
+    weighting_factor = 0.5 + 0.5 * closeness * 2
+    return (mz) * (intensity) * weighting_factor # Adjust contributions from mz and intensity 
 
-    # Match extracted m/z peaks to the reference spectrum
-    # Peaks that fall outside of the tolerance range do not contribute to the score
-def match_mz(reference_peaks, extracted_peaks, mz_tolerance):
+# Set m/z tolerance for peak alignment and matching
+mz_tolerance = 0.025
+
+# Set group tolerance for dealing with closely spaced peaks
+group_tolerance = 25
+
+# Match extracted m/z peaks to the reference spectrum
+# Peaks that fall outside of the tolerance range do not contribute to the score
+def match_mz(reference_peaks, extracted_peaks, mz_tolerance, group_tolerance):
+    # First, filter out the extracted peaks that are within the mz_tolerance of any reference peak
+    tolerance_filtered_extracted_peaks = [
+        (mz, intensity) for mz, intensity in extracted_peaks
+        if any(abs(mz - ref_mz) <= mz_tolerance for ref_mz, _ in reference_peaks)
+    ]
+    # Group peaks and select the most intense peak within each group for both reference and extracted peaks
+    grouped_reference_peaks = group_and_find_most_intense_peaks(reference_peaks, group_tolerance)
+    grouped_extracted_peaks = group_and_find_most_intense_peaks(tolerance_filtered_extracted_peaks, group_tolerance)
     reference_vector = []
     extracted_vector = []
-
-    for ref_mz, ref_intensity in reference_peaks:
-        # Find the closest matching peak in the extracted spectrum within the tolerance window
-        closest_peak = min(extracted_peaks, key=lambda x: (abs(x[0] - ref_mz) > mz_tolerance, abs(x[0] - ref_mz)))
-        if abs(closest_peak[0] - ref_mz) <= mz_tolerance:
-            closeness = calculate_closeness(closest_peak[0], ref_mz, mz_tolerance)
-            weighted_intensity = calculate_weighted_intensity_function(ref_mz, ref_intensity, closeness)
-            reference_vector.append(weighted_intensity)
-            extracted_vector.append(closest_peak[1])
+    # Iterate over the grouped reference peaks
+    for ref_mz, ref_intensity in grouped_reference_peaks:
+        # Find the closest extracted peak within the mz tolerance
+        closest_peak = min(
+            (peak for peak in grouped_extracted_peaks if abs(ref_mz - peak[0]) <= mz_tolerance),
+            key=lambda x: abs(ref_mz - x[0]),
+            default=(None, None)
+        )
+        closeness = calculate_closeness(ref_mz, closest_peak[0], mz_tolerance) if closest_peak[0] is not None else 0
+        if closest_peak[0] is not None:
+            # Calculate weighted intensities
+            ref_weighted_intensity = calculate_weighted_intensity_function(ref_mz, ref_intensity, closeness)
+            ext_weighted_intensity = calculate_weighted_intensity_function(closest_peak[0], closest_peak[1], closeness)
+            extracted_vector.append(ext_weighted_intensity)
         else:
-            # If no match is found within the tolerance window, append zero intensity
-            reference_vector.append(0)
-            extracted_vector.append(0)            
-    return reference_vector, extracted_vector
+            # No peak close enough in the extracted spectrum, so use zero intensity
+            extracted_vector.append(0)
+            ref_weighted_intensity = calculate_weighted_intensity_function(ref_mz, ref_intensity, closeness)      
+        reference_vector.append(ref_weighted_intensity)        
+    # Calculate the similarity score
+    return similarity_score(reference_vector, extracted_vector)
 
 # Remove ions that are greater than 2 Da above the molecular ion (i.e. "mz")
 def filter_ions_by_mz(peaks, molecular_ion_mz):
@@ -115,7 +134,6 @@ def similarity_score(reference_vector, extracted_vector):
     # Normalize vectors to unit vectors
     normalized_ref_vector = reference_vector / norm_ref if norm_ref != 0 else reference_vector
     normalized_ext_vector = extracted_vector / norm_ext if norm_ext != 0 else extracted_vector
-    
     # Calculate cosine similarity score
     similarity = np.dot(normalized_ref_vector, normalized_ext_vector)
     return similarity * 100
@@ -125,27 +143,53 @@ params = {"font.family": "Arial",
           "font.weight": "bold"}
 plt.rcParams.update(params)
 
-# Generate mirror plot showing extracted and reference MS/MS spectra
-# Only extracted peaks that fall within the m/z tolerance are plotted
-def mirror_plot(filtered_mz, filtered_intensity, reference_peaks, title_mirror, fname_mirror, mz_tolerance):
+def group_and_find_most_intense_peaks(peaks, group_tolerance):
+    if not peaks:
+        return []
+    # Sort peaks by m/z value
+    sorted_peaks = sorted(peaks, key=lambda x: x[0])
+    # Initialize the first group
+    grouped_peaks = [[sorted_peaks[0]]]
+    for current_peak in sorted_peaks[1:]:
+        # Check if the current peak is within the tolerance of the last group's m/z value
+        if abs(current_peak[0] - grouped_peaks[-1][-1][0]) <= group_tolerance:
+            grouped_peaks[-1].append(current_peak)
+        else:
+            # If not, start a new group
+            grouped_peaks.append([current_peak])
+    # For each group, find the peak with the maximum intensity
+    most_intense_peaks = [max(group, key=lambda x: x[1]) for group in grouped_peaks]
+    return most_intense_peaks
+
+def mirror_plot(filtered_mz, filtered_intensity, reference_peaks, title_mirror, fname_mirror, mz_tolerance, group_tolerance):
     if len(filtered_mz) == 0 or len(reference_peaks) == 0:
         print("One or both m/z arrays are empty.")
         return
     reference_mz, reference_intensity = zip(*reference_peaks)
     reference_intensity = [-intensity for intensity in reference_intensity]
-    tolerance_filtered_peaks = [(mz, intensity) for mz, intensity in zip(filtered_mz, filtered_intensity) if any(abs(mz - ref_mz) <= mz_tolerance for ref_mz in reference_mz)]
-    if tolerance_filtered_peaks:
-        tolerance_filtered_mz, tolerance_filtered_intensity = zip(*tolerance_filtered_peaks)
-    else:
+    tolerance_filtered_peaks = [(mz, intensity) for mz, intensity in zip(filtered_mz, filtered_intensity)
+                                if any(abs(mz - ref_mz) <= mz_tolerance for ref_mz in reference_mz)]
+    if not tolerance_filtered_peaks:
         print("No extracted peaks within the m/z tolerance range.")
         return
+    tolerance_filtered_mz, tolerance_filtered_intensity = zip(*tolerance_filtered_peaks)
+    # Group peaks and select the most intense peak within each group
+    most_intense_experimental = group_and_find_most_intense_peaks(tolerance_filtered_peaks, group_tolerance)
+    most_intense_reference = group_and_find_most_intense_peaks(reference_peaks, group_tolerance)
+    # Plotting
     fig, ax = plt.subplots(figsize=(6.4, 4.8))
     stemContainer1 = ax.stem(tolerance_filtered_mz, tolerance_filtered_intensity, linefmt="-b", basefmt=" ", markerfmt=" ", label="Experimental") # Plot experimental MS/MS spectrum
     stemContainer2 = ax.stem(reference_mz, reference_intensity, linefmt="-r", basefmt=" ", markerfmt=" ", label="Reference") # Plot reference MS/MS spectrum
     stemContainer1.stemlines.set_linewidths(1)
     stemContainer2.stemlines.set_linewidths(1) 
-    """stemContainer1.markerline.set_markersize(3)
-    stemContainer2.markerline.set_markersize(3)""" # Mark peaks with circles
+    # Annotate the most intense peaks for experimental data
+    for mz_val, intensity_val in most_intense_experimental:
+        ax.annotate(f"{mz_val:.4f}", xy=(mz_val, intensity_val), xytext=(2, 2),
+                    textcoords="offset points", ha="center", va="bottom", fontsize=8)
+    # Annotate the most intense peaks for reference data
+    for mz_val, intensity_val in most_intense_reference:
+        ax.annotate(f"{mz_val:.4f}", xy=(mz_val, -intensity_val), xytext=(2, -2),
+                    textcoords="offset points", ha="center", va="top", fontsize=8)
     legend = ax.legend(loc="best", frameon=True, edgecolor="black", fontsize=10, facecolor="white") # Create legend
     for text in legend.get_texts():
         text.set_fontname("Arial")
@@ -329,14 +373,16 @@ if matching_criteria in ["mz_rt_ccs_msms"]:
                     reference_peaks = msms_data
 
                     # Calculate cosine similarity score between extracted and reference spectra
-                    reference_vector, extracted_vector = match_mz(reference_peaks, filtered_extracted_peaks, mz_tolerance)
-                    similarity = similarity_score(reference_vector, extracted_vector)
+                    extracted_peaks = filtered_extracted_peaks
+                    similarity = match_mz(reference_peaks, extracted_peaks, mz_tolerance, group_tolerance)
+                    if np.isnan(similarity): 
+                        similarity = 0
                     similarity_list.append(similarity)
  
                     # Generate a mirror plot of extracted vs. reference (experimental) MSMS spectra
                     title_mirror = "Experimental vs. Reference MS/MS Spectra \nPotential Match: {} (Score: {}) ".format(potential_match, "0" if np.isnan(similarity) else "{:.2f}".format(similarity))
                     fname_mirror = "{}/{}_{}_{}_{:.2f}_Experimental_MSMS.png".format(spectra_directory, file_name, mz, potential_match, rt)
-                    mirror_plot(list(filtered_mz), list(filtered_intensity), reference_peaks, title_mirror, fname_mirror, mz_tolerance)
+                    mirror_plot(list(filtered_mz), list(filtered_intensity), reference_peaks, title_mirror, fname_mirror, mz_tolerance, group_tolerance)
 
                 # User has selected qacs_theoretical_msms reference database
                 elif database_type == "qacs_theoretical_msms":
@@ -349,13 +395,18 @@ if matching_criteria in ["mz_rt_ccs_msms"]:
                     if len(msms_data) == 0:
                         continue
 
+                    # Pair the reference m/z and intensity values
+                    reference_peaks = msms_data
+
                     # Convert the reference MSMS data to numpy arrays
                     reference_mz, reference_intensity = zip(*msms_data)
                     reference_mz = np.array(reference_mz)
                     reference_intensity = np.array(reference_intensity)
 
                     # Calculate cosine similarity score between extracted MSMS spectrum and reference MSMS spectrum
-                    reference_vector, extracted_vector = match_mz(reference_mz, reference_intensity, filtered_mz, filtered_intensity)
+                    reference_mz, reference_intensity = zip(*msms_data)
+                    extracted_mz, extracted_intensity = zip(*filtered_extracted_peaks)
+                    reference_vector, extracted_vector = match_mz(reference_mz, reference_intensity, extracted_mz, extracted_intensity, mz_tolerance, group_tolerance)
                     similarity = similarity_score(reference_vector, extracted_vector)
                     if np.isnan(similarity): similarity = 0
                     similarity_list.append(similarity)
@@ -363,7 +414,7 @@ if matching_criteria in ["mz_rt_ccs_msms"]:
                     # Generate mirror plot of experimental and reference (theoretical) MSMS spectra
                     title_mirror = "Experimental vs. Reference MS/MS Spectra \nPotential Match: {} (Score: {}) ".format(potential_match, "0" if np.isnan(similarity) else "{:.2f}".format(similarity))
                     fname_mirror = "{}/{}_{}_{}_{:.2f}_Theoretical_MSMS.png".format(spectra_directory, file_name, mz, potential_match, rt)
-                    mirror_plot(list(filtered_mz), list(filtered_intensity), reference_peaks, title_mirror, fname_mirror, mz_tolerance)
+                    mirror_plot(list(filtered_mz), list(filtered_intensity), reference_peaks, title_mirror, fname_mirror, mz_tolerance, group_tolerance)
                 
             tuples = sorted(zip(similarity_list, potential_matches), reverse=True)
             ordered_potential_matches = [f"{t[1]} ({t[0]})" for t in tuples]
