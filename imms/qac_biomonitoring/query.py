@@ -8,6 +8,9 @@ from matplotlib import rcParams
 from matplotlib.lines import Line2D
 from dhrmasslynxapi.reader import MassLynxReader
 
+# Enter path to the Excel spreadsheet containing processed and filtered data
+input_file = "2023_07_27_RO1_pooled_feces_30B_100B_filtered.xlsx"
+
 # Set m/z tolerance for peak alignment and matching
 mz_tolerance = 0.01
 
@@ -192,9 +195,6 @@ def mirror_plot(filtered_mz, filtered_intensity, reference_peaks, title_mirror, 
 spectra_directory = "Fragmentation Spectra"
 if not os.path.exists(spectra_directory):
     os.makedirs(spectra_directory)
-
-# Enter path to the Excel spreadsheet containing processed and filtered data
-input_file = "2023_07_27_RO1_pooled_feces_15B_90B_filtered.xlsx"
 
 # Mapping numbers to matching criteria for user input
 matching_criteria_dict = {
@@ -496,7 +496,7 @@ if matching_criteria in ["mz_rt_ccs_msms"]:
                 # Combine everything back together and add to the list
                 formatted_compounds.append(f"{chemical} (SIM: {formatted_sim}, CIAM: {formatted_ciam})")
             # Join the formatted compounds into a single string to return
-            return "), ".join(formatted_compounds)
+            return ", ".join(formatted_compounds)
         except ValueError as e:
             print(f"ValueError processing value '{value}': {e}")
             return value
