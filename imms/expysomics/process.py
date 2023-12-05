@@ -265,6 +265,8 @@ class RawProcessor:
 				# Extract (m/z,rt)-selected ion mobilogram (EIM) for each identified LC peak using +/- 0.1 min window
 				t, dt_i = rdr.get_filtered_chrom(self.mobility_function, float(mz), self.mz_tolerance, rt_min=float(rt_value)-0.1, rt_max=float(rt_value)+0.1)
 
+				dt = None
+
 				# Smooth and fit EIM to Gaussian function
 				A, B, C = self.peak_fit(t, dt_i)
 				t_refined = np.arange(min(t), max(t), 0.01)
