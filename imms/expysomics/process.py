@@ -256,7 +256,7 @@ class RawProcessor:
 			for rt_value, peak_area in zip(rt_list, areas):
 
 				# Extract MS1 spectrum for isotopologue check
-				mz_spectrum, intensity_spectrum = rdr.get_spectrum(ms1_function, float(rt_value) - 0.1, float(rt_value) + 0.1)
+				mz_spectrum, intensity_spectrum = rdr.get_spectrum(ms1_function, float(rt_value) - 0.01, float(rt_value) + 0.01)
 
 				# Identify the monoisotopic peak
 				monoisotopic_mz = self.monoisotopic_peak(mz_spectrum, intensity_spectrum, float(mz))
