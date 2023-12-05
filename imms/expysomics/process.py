@@ -250,7 +250,7 @@ class RawProcessor:
 			rt_i = np.array(rt_i)
 
 			# Smooth and fit EIC with multigauss module
-			peak_indices, rt_list, areas = process_data(rt, rt_i, file_name, mz, sample_type, generate_figures=True)
+			peak_indices, rt_list, areas = process_data(rt, rt_i, file_name, mz, sample_type)
 
 			# Iterate over each extracted LC ion chromatogram peak
 			for rt_value, peak_area in zip(rt_list, areas):
