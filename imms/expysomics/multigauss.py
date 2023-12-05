@@ -39,7 +39,7 @@ def process_data(rt, rt_i, file_name, mz, sample_type): # Raw values extracted u
             y += A * np.exp(-((x - mu_values[int(i/2)])**2) / (2 * sigma**2))
         return y
 
-    # Create "Extracted Chromatograms" folder if it does not exist
+    # Generate a new folder called  "Extracted Chromatograms" in the directory if not already present
     chromatogram_directory = "Extracted Chromatograms"
     if not os.path.exists(chromatogram_directory):
         os.makedirs(chromatogram_directory)
