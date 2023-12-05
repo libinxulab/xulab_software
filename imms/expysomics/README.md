@@ -1,6 +1,6 @@
 ## xulab_software/imms/expysomics
 
-These Python scripts are intended to facilitate the integration of data independent (DIA) IM-MS/MS data into nontarget and suspect screening workflows. The current version of `expysomics` supports the detection and identification of quaternary ammonium compounds (QACs) and their phase I hepatic metabolites in human biological samples; the complete QAC reference database referred to herein is available at https://ccsbase.net/qac. Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `expysomics` package. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
+This Python package is intended to facilitate the integration of data independent (DIA) IM-MS/MS data into nontarget and suspect screening workflows. The current version of `expysomics` supports the detection and identification of quaternary ammonium compounds (QACs) and their phase I hepatic metabolites in human biological samples; the complete QAC reference database referred to herein is available at https://ccsbase.net/qac. Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `expysomics` package. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
 * `cdt.dll`
 * `MassLynxLockMassProcessor.py`
 * `MassLynxRaw.dll`
