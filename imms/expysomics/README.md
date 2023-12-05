@@ -79,9 +79,9 @@ This is the primary method for extracting data from .raw files for downstream an
 * `mobility_function` `(float)` - function containing mobility data
 * `mz_tolerance` `(float)` - mass tolerance (in Da)
 
-To convert extracted drift times into calibrated CCS values, the path to a file with the following information must be indicated:
+To convert extracted drift times into calibrated CCS values, the path to an Excel (.xlsx) spreadsheet with the following information must be indicated:
 1. **observed calibrant m/z vaues**: list of the observed m/z values for a set of CCS calibrants
-2. **reference CCS values**: Literature CCS values of the calibrants used 
+2. **reference CCS values**: literature CCS values of the calibrants used 
 
 An example CCS calibrant spreadsheet is provided within this repository.
 
@@ -171,7 +171,7 @@ matches.match_features(0.025, 0.2, 0.03)
 `FeatureAnnotate.match_msms`
 This is the primary method for matching extracted spectral features with potential compounds within the QAC reference database based on m/z, retention time, CCS, and MS/MS spectral matching selection criteria.
 
-`FeatureAnnotate.match_msms` annotates extracted spectral features with potential matches based on m/z, retention time, and CCS selection criteria. The reference MS/MS spectrum for each potential match (if any) is first retrieved from the spectral database indicated during the initialization of the FeatureAnnotate object. Then, all ion fragmentation (AIF) spectra are **(1)** extracted from the .raw data file around the feature's retention and drift time windows, **(2)**normalized, **(3)** deconvoluted (by attempting to align fragment ion drift times with the precursor ion drift time), and then **(4)** compared to reference spectra using the cosine similarity score. `FeatureAnnotate.match_msms` also returns a composite score, adapted from MetaboAnnotatoR (Ebbels et al., 2022), calculated by summing the **(1)** reciprocal of the m/z error between the target and potential match parent, **(2)** CCS difference between the target and potential match parent, and **(3)** similarity of the fragmentation patterns. Similar to MetaboAnnotatoR, `expysomics` downweighs, by a factor of 2, fragment ions that are not drift time-aligned with their precursor ion but still present in the extracted AIF spectrum. 
+`FeatureAnnotate.match_msms` annotates extracted spectral features with potential matches based on m/z, retention time, and CCS selection criteria. The reference MS/MS spectrum for each potential match (if any) is first retrieved from the spectral database indicated during the initialization of the FeatureAnnotate object. Then, all ion fragmentation (AIF) spectra are **(1)** extracted from the .raw data file around the feature's retention and drift time windows, **(2)** normalized, **(3)** deconvoluted (by attempting to align fragment ion drift times with the precursor ion drift time), and then **(4)** compared to reference spectra using the cosine similarity score. `FeatureAnnotate.match_msms` also returns a composite score, adapted from MetaboAnnotatoR (Ebbels et al., 2022), calculated by summing the **(1)** reciprocal of the m/z error between the target and potential match parent, **(2)** CCS difference between the target and potential match parent, and **(3)** similarity of the fragmentation patterns. Similar to MetaboAnnotatoR, `expysomics` downweighs, by a factor of 2, fragment ions that are not drift time-aligned with their precursor ion but still present in the extracted AIF spectrum. 
 
 #### Parameters
 * `ms1_function` `(float)` - function to use for MS1 scan
