@@ -162,7 +162,7 @@ class FeatureAnnotate:
 
 		# Combine and sort all unique m/z values
 		all_mz = sorted(set(reference_mz_list + extracted_mz_list))
-		print("mz list: {}".format(all_mz))
+		"""print("mz list: {}".format(all_mz))"""
 
 		# Initialize lists to hold the matched intensity values
 		reference_vector = []
@@ -370,71 +370,86 @@ class FeatureAnnotate:
 		"""
 		# Initialize MassLynxReader object
 		rdr = MassLynxReader(file_name)
-		grouped_peak_list = self.group_peaks(zip(extracted_mz, extracted_intensity), group_tolerance)
-
+		
 		# Group reference spectra for each potential match
+		grouped_reference_spectra = {}
 		for potential_match in reference_spectra.keys():
 			msms_data = reference_spectra[potential_match]
 			grouped_reference_peaks = self.group_peaks(msms_data, group_tolerance=1)
-			reference_spectra[potential_match] = grouped_reference_peaks
+			grouped_reference_spectra[potential_match] = grouped_reference_peaks
 
-		# Initialize empty lists for included (processed) and discarded peaks
 		processed_peaks = []
 
-		# Locate the precursor peak in the AIF to ensure it is included in processed_peaks list
-		precursor_peak = self.find_closest_peak(grouped_peak_list, mz)
+		# Identify the precursor peak in the AIF
+		precursor_peak = self.find_closest_peak(zip(extracted_mz, extracted_intensity), mz)
 		precursor_dt = dt
 		if precursor_peak:
-				processed_peaks.append((precursor_peak[0], precursor_peak[1], "precursor"))
+			processed_peaks.append((precursor_peak[0], precursor_peak[1], "precursor"))
+		print("\n\t\tprecursor peak: {} precursor dt: {}".format(precursor_peak[0], precursor_dt))
 
-		print("\n\t\tPotential match found. Performing spectral deconvolution.")
-		print("\n\t\tprecursor: {} precursor dt: {}".format(precursor_peak[0], precursor_dt))
+		# Iterate over each grouped reference fragment peak to find the closest peak in the AIF
+		for _, grouped_ref_peaks in grouped_reference_spectra.items():
+			for ref_mz, _ in grouped_ref_peaks:
 
-		# Iterate over each extracted peak in the AIF spectrum
-		for mz_val, intensity_val in grouped_peak_list:
+				# Skip the reference peak closest to the precursor m/z
+				if abs(ref_mz - mz) <= 0.025:
+					continue
+				closest_peak = self.find_closest_peak(zip(extracted_mz, extracted_intensity), ref_mz)	
+				if closest_peak:
+					mz_val, intensity_val = closest_peak 
 
-			# Skip the identified precursor peak to avoid redundancy and reduce computation time
-			if mz_val == precursor_peak[0]:
-				continue
+					# Skip the identified precursor peak
+					if mz_val == precursor_peak[0]:
+						continue
 
-			# Only iterate over potential fragment peaks
-			if mz_val < mz:
+					# Check for retention and drift time alignment with the precursor ion
+					# In future implementations, link retention time bounds to identified EIC indices
+					fragment_dt, fragment_dt_i = rdr.get_filtered_chrom(mobility_function, mz_val, 0.025, rt_min=rt-0.05, rt_max=rt+0.05)
 
-				# Attempt to extract precursor retention time-selected EIM
-				fragment_dt, fragment_dt_i = rdr.get_filtered_chrom(mobility_function, mz_val, 0.025, rt_min=rt-0.1, rt_max=rt+0.1)
+					# Parameter for smoothing Gaussian function
+					t_refined = np.arange(min(fragment_dt), max(fragment_dt), float(0.001))
 
-				# Parameter for smoothing Gaussian curve
-				t_refined = np.arange(min(fragment_dt), max(fragment_dt), float(0.001))
+					# Initialize and fit Gaussian function
+					A, B, C = self.peak_fit(fragment_dt, fragment_dt_i)
+					fit_i = self.gaussian_fit(t_refined, A, B, C)
 
-				# Initialize and fit Gaussian function
-				A, B, C = self.peak_fit(fragment_dt, fragment_dt_i)
-				fit_i = self.gaussian_fit(t_refined, A, B, C)
-
-				# Apply FWHM and intensity thresholds
-				if self.fwhm_threshold(C, fragment_dt_i) and precursor_dt is not None:
-					fwhm = C * 2.355
-					if fwhm < 2.5 and fwhm > 0.05 and max(fragment_dt_i) > 500:
+					# Apply FWHM and intensity thresholds
+					if self.fwhm_threshold(C, fragment_dt_i):
 						fitted_fragment_dt = float(round(B, 2))
 
-						# Compare fragment ion dt to precursor ion dt
-						if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance:
+						print("\n\t\tfragment m/z: {} fragment dt: {}".format(mz_val, fitted_fragment_dt))
 
-							# If fragment ion aligns with precursor ion dt, add to processed_peaks 
-							# Add "dt" tag for scoring purposes
-							processed_peaks.append((mz_val, intensity_val, "dt"))
+						# Apply tags depending on alignment status
+						tag = "dt" if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance else "mz"
+						processed_peaks.append((mz_val, intensity_val, tag))
 
-						# If fragment ion does not align with precursor ion but does have a corresponding peak in the reference spectrum of the potential match(es), it is added to processed_peaks 
-						# Add "mz" tag for scoring purposes
-						# Method follows standards established by MetaboAnnotatoR (Ebbels et al., 2022)	
-						# Check if fragment ion has a corresponding peak in any of the reference spectra 
-						elif self.reference_match(mz_val, reference_spectra, mz_tolerance=0.025):
+		# Group remaining AIF fragment peaks
+		remaining_peaks = [(mz_val, intensity_val) for mz_val, intensity_val in zip(extracted_mz, extracted_intensity) if mz_val <= mz and not any(peak[0] == mz_val for peak in processed_peaks)]
+		grouped_remaining_peaks = self.group_peaks(remaining_peaks, group_tolerance)
+		"""print("grouped remaining peaks: {}".format(grouped_remaining_peaks))"""
 
-							# Add fragment ion to processed_peaks with "mz" tag for scoring
-							processed_peaks.append((mz_val, intensity_val, "mz"))
+		# Iterate over each extracted peak in the remaining grouped AIF spectrum
+		for mz_val, intensity_val in grouped_remaining_peaks:
 
-						print("\n\t\tfragment ion peak: {} dt: {}".format(mz_val, fitted_fragment_dt))
+			# Attempt to extract precursor retention time-selected EIM
+			# In future implementations, link retention time bounds to EIC indices
+			fragment_dt, fragment_dt_i = rdr.get_filtered_chrom(mobility_function, mz_val, 0.025, rt_min=rt-0.05, rt_max=rt+0.05)
 
-		print("processed peaks: {}".format(processed_peaks))
+			# Parameter for smoothing Gaussian curve
+			t_refined = np.arange(min(fragment_dt), max(fragment_dt), float(0.001))
+
+			# Initialize and fit Gaussian function
+			A, B, C = self.peak_fit(fragment_dt, fragment_dt_i)
+			fit_i = self.gaussian_fit(t_refined, A, B, C)
+
+			# Apply FWHM and intensity thresholds
+			if self.fwhm_threshold(C, fragment_dt_i) and precursor_dt is not None:
+				fitted_fragment_dt = float(round(B, 2))
+				print("\n\t\tfragment m/z: {} dt: {}".format(mz_val, fitted_fragment_dt))
+				if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance:
+					processed_peaks.append((mz_val, intensity_val, "dt"))
+			
+		"""print("processed peaks: {}".format(processed_peaks))"""
 		return processed_peaks
 
 	def match_features(self, mz_tolerance, rt_tolerance=None, ccs_tolerance=None):
@@ -649,8 +664,8 @@ class FeatureAnnotate:
 						# Group and find the most intense reference peaks for fair comparison to extracted peaks
 						grouped_reference_peaks = self.group_peaks(msms_data, group_tolerance=1)
 						reference_spectra[potential_match] = grouped_reference_peaks
-						print("reference spectra: {}".format(reference_spectra))
-						print("grouped reference spectra: {}".format(grouped_reference_peaks))
+						"""print("reference spectra: {}".format(reference_spectra))
+						print("grouped reference spectra: {}".format(grouped_reference_peaks))"""
 					else:
 						reference_mz, reference_intensity = [], []
 
@@ -661,12 +676,13 @@ class FeatureAnnotate:
 
 					if reference_ccs_data:
 						reference_ccs = reference_ccs_data[0]
-						print("reference_ccs: {}".format(reference_ccs))
+						"""print("reference_ccs: {}".format(reference_ccs))"""
 
 						# Calculate error between CCS of extracted spectral feature and reference CCS of potential match
 						ccs_difference = abs(reference_ccs - ccs) / reference_ccs
 						ccs_similarity_score = max(1 - ccs_difference, 0)
-						print("ccs similarity score: {}".format(ccs_similarity_score))
+						print("\n\t\t**Potential match found. Performing spectral deconvolution and scoring.**")
+						print("\n\t\tCCS Similarity Score: {}".format(ccs_similarity_score))
 					else:
 						ccs_similarity_score = 0
 
@@ -684,7 +700,7 @@ class FeatureAnnotate:
 				for _, _, tag in processed_peaks:
 					fragmentation_score[tag] += 1
 
-				print("fragmentation score: {}".format(fragmentation_score))
+				print("\n\t\tFragmentation Tag Counter: {}".format(fragmentation_score))
 
 				similarity_list = []
 
@@ -701,7 +717,7 @@ class FeatureAnnotate:
 					mz_error = abs(monoisotopic_mz - mz) / mz * 1e6 
 					mz_similarity_score = min(1 / mz_error, 1) if mz_error != 0 else 1
 
-					print("mz similarity score: {}".format(mz_similarity_score))
+					"""print("mz similarity score: {}".format(mz_similarity_score))"""
 
 					# Calculate composite score
 					composite_score = self.composite_score(mz_similarity_score, fragmentation_score, ccs_similarity_score)
@@ -723,51 +739,24 @@ class FeatureAnnotate:
 						self.mirror_plot(list(processed_mz), list(processed_intensity), grouped_reference_peaks, title_mirror, fname_mirror)
 
 				# Sort and format the potential matches
-				ordered_potential_matches = [f"{t[2]} (CS: {t[0]:.2f}, SIM: {t[1]:.2f})" for t in sorted(similarity_list, key=lambda x: x[0], reverse=True)]
-				ranked_matches = ", ".join(ordered_potential_matches) if ordered_potential_matches else ""
+				formatted_ranked_matches = ", ".join([f"{t[2]} (CS: {t[0]:.2f}, SIM: {t[1]:.2f})" for t in sorted(similarity_list, key=lambda x: x[0], reverse=True)]) if similarity_list else ""
+				formatted_potential_matches = ", ".join(potential_matches) if potential_matches else None
 
-				# Append to the final rows
-				row_data = [file_name, mz, rt, ccs, gradient, ccs_calibrant, column_type, ranked_matches]
-				final_rows.append(row_data)
-
-		# Create a new pandas DataFrame from the final rows
-		columns = ["file_name", "mz", "rt", "ccs", "gradient", "ccs_calibrant", "column_type", "ranked_matches"]
-		df_output = pd.DataFrame(final_rows, columns=columns)
+				# Update the pandas DataFrame
+				self.feature_df.at[i, "potential_matches"] = formatted_potential_matches
+				self.feature_df.at[i, "ranked_matches"] = formatted_ranked_matches
 
 		# Choose output file name based on database type
 		base_name = os.path.splitext(os.path.basename(self.feature_list))[0]
 		if database_type == "experimental":
 			output_file = base_name[:-9] + "_matches_ranked_experimental.xlsx"
 		elif database_type == "theoretical":
-			output_file = base_name[:-9] + "_matches_ranked_theoretical.xlsx"
-
-		# Define function to format ranked and potential matches
-		def format_ranked_matches(value):
-			try:
-				formatted_compounds = []
-				compounds = value.split(", ")
-				for compound in compounds:
-					parts = compound.rsplit(" (SIM: ", 1)
-					if len(parts) ==2:
-						chemical, sim_score_str = parts
-						formatted_sim = format(float(sim_score_str.rstrip(")")), ".2f")
-						formatted_compounds.append(f"{chemical} (SIM: {formatted_sim})")
-					else:
-
-						# Handle the case where the delimiter is not found
-						formatted_compounds.append(compound)
-				return ", ".join(formatted_compounds)
-			except ValueError as e:
-				print(f"ValueError processing value {value}: {e}")
-				return value
-
-		# Apply formatting functions
-		df_output["ranked_matches"] = df_output["ranked_matches"].apply(format_ranked_matches)
+			output_file = base_name[:-9] + "_matches_ranked_theoretical.xlsx"	
 
 		# Export the pandas DataFrame to an Excel (.xlsx) file
-		df_output.to_excel(output_file, index=False, float_format="%.2f")
+		self.feature_df.to_excel(output_file, index=False)
 
-		print(f"Successful analysis. View ranked matches in {output_file}.\n")
+		print(f"\nSuccessful analysis. View ranked matches in {output_file}.\n")
 
 	def __del__(self):
 		# Close the database connections
