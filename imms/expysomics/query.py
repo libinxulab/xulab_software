@@ -629,7 +629,7 @@ class FeatureAnnotate:
 		db_table = "experimental_msms_data" if database_type == "experimental" else "theoretical_msms_data"
 
 		final_rows = []
-
+		
 		# Iterate over each row in the pandas DataFrame
 		for i, row in self.feature_df.iterrows():
 			file_name, mz, rt, ccs, gradient, ccs_calibrant, column_type, monoisotopic_mz = row["file_name"], row["mz"], row["rt"], row["ccs"], row["gradient"], row["ccs_calibrant"], row["column_type"], row["monoisotopic_mz"]
@@ -745,16 +745,22 @@ class FeatureAnnotate:
 				# Update the pandas DataFrame
 				self.feature_df.at[i, "potential_matches"] = formatted_potential_matches
 				self.feature_df.at[i, "ranked_matches"] = formatted_ranked_matches
+				print(self.feature_df[["potential_matches", "ranked_matches"]].head())
+
+		# Filter pandas DataFrame to remove rows with no potential matches or ranked matches
+		self.feature_df.replace("nan", np.nan, inplace=True)
+		filtered_df = self.feature_df.dropna(subset=["potential_matches", "ranked_matches"])
+		filtered_df = filtered_df[filtered_df["potential_matches"] != ""]
+		filtered_df = filtered_df[filtered_df["ranked_matches"] != ""]
+		print(filtered_df[["potential_matches", "ranked_matches"]].head())
 
 		# Choose output file name based on database type
 		base_name = os.path.splitext(os.path.basename(self.feature_list))[0]
-		if database_type == "experimental":
-			output_file = base_name[:-9] + "_matches_ranked_experimental.xlsx"
-		elif database_type == "theoretical":
-			output_file = base_name[:-9] + "_matches_ranked_theoretical.xlsx"	
+		output_file_suffix = "_matches_ranked_experimental.xlsx" if database_type == "experimental" else "_matched_ranked_theoretical.xlsx"
+		output_file = base_name + output_file_suffix	
 
 		# Export the pandas DataFrame to an Excel (.xlsx) file
-		self.feature_df.to_excel(output_file, index=False)
+		filtered_df.to_excel(output_file, index=False)
 
 		print(f"\nSuccessful analysis. View ranked matches in {output_file}.\n")
 
