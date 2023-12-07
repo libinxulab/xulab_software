@@ -745,14 +745,14 @@ class FeatureAnnotate:
 				# Update the pandas DataFrame
 				self.feature_df.at[i, "potential_matches"] = formatted_potential_matches
 				self.feature_df.at[i, "ranked_matches"] = formatted_ranked_matches
-				print(self.feature_df[["potential_matches", "ranked_matches"]].head())
+				"""print(self.feature_df[["potential_matches", "ranked_matches"]].head())"""
 
 		# Filter pandas DataFrame to remove rows with no potential matches or ranked matches
 		self.feature_df.replace("nan", np.nan, inplace=True)
 		filtered_df = self.feature_df.dropna(subset=["potential_matches", "ranked_matches"])
 		filtered_df = filtered_df[filtered_df["potential_matches"] != ""]
 		filtered_df = filtered_df[filtered_df["ranked_matches"] != ""]
-		print(filtered_df[["potential_matches", "ranked_matches"]].head())
+		"""print(filtered_df[["potential_matches", "ranked_matches"]].head())"""
 
 		# Choose output file name based on database type
 		base_name = os.path.splitext(os.path.basename(self.feature_list))[0]
