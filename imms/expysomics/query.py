@@ -10,6 +10,9 @@ from scipy.optimize import curve_fit
 from multigauss import process_data
 from dhrmasslynxapi.reader import MassLynxReader
 
+# TODO
+# Edit peak windows to be actual peak indices from scipy.find_peaks
+
 # Set global font conditions for figures
 params = {"font.family": "Arial",
 		  "font.weight": "bold"}
@@ -540,24 +543,6 @@ class FeatureAnnotate:
 
 			print(f"\nSuccessful analysis. View potential matches in {output_file}.\n")
 
-	def reference_match(self, mz_val, reference_spectra, mz_tolerance=0.025):
-		"""
-		FeatureAnnotate.reference_match
-		description:
-			Checks if a given extracted fragment m/z value has a corresponding peak in the reference spectrum within a specified m/z tolerance.
-		parameters:
-			mz_val (float) -- the m/z value to be matched.
-			reference_spectra (dict) -- dictionary where keys are potential compound names and values are lists of tuples representing m/z, intensity peaks 
-			mz_tolerance (float) -- the m/z tolerance for matching peaks. Default is 0.025.
-		returns:
-			(bool) -- True if a matching peak is found in the reference spectrum, False otherwise. 
-		"""
-		for _, msms_data in reference_spectra.items():
-			for ref_mz, _ in msms_data:
-				if abs(ref_mz - mz_val) <= mz_tolerance:
-					return True 
-		return False
-
 	def normalize_and_process(self, processed_peaks):
 		"""
 		FeatureAnnotate.normalize_and_process
@@ -575,7 +560,7 @@ class FeatureAnnotate:
 		else:
 			return [], []
 
-	def composite_score(self, mz_similarity_score, fragmentation_score, ccs_similarity_score):
+	def composite_score(self, mz_similarity_score, cosine_similarity_score, ccs_similarity_score):
 		"""
 		FeatureAnnotate.composite_score
 		description:
@@ -583,22 +568,12 @@ class FeatureAnnotate:
 			Method adapted from MetaboAnnotatoR (Ebbels et al., 2022)
 		parameters:
 			mz_similarity_score (float) -- score for similarity between extracted monoisotopic peak and candidate m/z (i.e., the target m/z).
-			fragmentation_score (float) -- weighted cosine similarity score that downweights AIF fragment ions relative to dt-aligned fragment ions. 
-			dt_tag_weight (float) -- weighting factor for dt-aligned fragment ions.
-			mz_tag_weight (float) -- weighting factor for non-dt aligned fragment ions that were pulled from AIF. 
+			cosine_similarity_score (float) -- weighted cosine similarity score that downweights AIF fragment ions relative to dt-aligned fragment ions. 
+			ccs_similarity_score (float) -- score for similarity between spectral feature CCS value and reference CCS value for each candidate.
 		returns:
 			(float) -- composite score. 
 		"""
-		dt_tag_weight = 1
-		mz_tag_weight = 0.5
-
-		dt_aligned_score = sum(fragmentation_score.get(tag, 0) * dt_tag_weight for tag in fragmentation_score if tag == "dt")
-		mz_aligned_score = sum(fragmentation_score.get(tag, 0) * mz_tag_weight for tag in fragmentation_score if tag == "mz")
-
-		# Combined the scores
-		total_fragmentation_score = dt_aligned_score + mz_aligned_score
-
-		return mz_similarity_score + total_fragmentation_score + ccs_similarity_score
+		return mz_similarity_score + cosine_similarity_score + ccs_similarity_score
 
 	def match_msms(self, ms1_function, mobility_function, database_type, mz_tolerance, rt_tolerance, ccs_tolerance):
 		"""
@@ -680,7 +655,7 @@ class FeatureAnnotate:
 
 						# Calculate error between CCS of extracted spectral feature and reference CCS of potential match
 						ccs_difference = abs(reference_ccs - ccs) / reference_ccs
-						ccs_similarity_score = max(1 - ccs_difference, 0)
+						ccs_similarity_score = max(1 - ccs_difference, 0) * 100
 						print("\n\t\t**Potential match found. Performing spectral deconvolution and scoring.**")
 						print("\n\t\tCCS Similarity Score: {}".format(ccs_similarity_score))
 					else:
@@ -715,14 +690,17 @@ class FeatureAnnotate:
 
 					# Calculate m/z similarity score between potential match m/z (i.e, row["mz"]) and monoisotopic m/z peak of extracted feature
 					mz_error = abs(monoisotopic_mz - mz) / mz * 1e6 
-					mz_similarity_score = min(1 / mz_error, 1) if mz_error != 0 else 1
+					mz_similarity_score = min(1 / mz_error, 1) * 100 if mz_error != 0 else 100
 
 					"""print("mz similarity score: {}".format(mz_similarity_score))"""
 
 					# Calculate composite score
-					composite_score = self.composite_score(mz_similarity_score, fragmentation_score, ccs_similarity_score)
+					composite_score = self.composite_score(mz_similarity_score, similarity_score, ccs_similarity_score)
 
-					similarity_list.append((composite_score, similarity_score, potential_match))
+					# Store the composite score to show both the raw score and its percentage out of the theoretical maximum score of 300
+					formatted_composite_score = f"{composite_score:.2f} / {(composite_score / 300) * 100:.2f}%"
+
+					similarity_list.append((composite_score, similarity_score, formatted_composite_score, potential_match))
 
 					# Create "Fragmentation Spectra" folder if not already present
 					spectra_directory = "Fragmentation Spectra"
@@ -739,7 +717,7 @@ class FeatureAnnotate:
 						self.mirror_plot(list(processed_mz), list(processed_intensity), grouped_reference_peaks, title_mirror, fname_mirror)
 
 				# Sort and format the potential matches
-				formatted_ranked_matches = ", ".join([f"{t[2]} (CS: {t[0]:.2f}, SIM: {t[1]:.2f})" for t in sorted(similarity_list, key=lambda x: x[0], reverse=True)]) if similarity_list else ""
+				formatted_ranked_matches = ", ".join([f"{t[3]} (CS: {t[2]} | SIM: {t[1]})" for t in sorted(similarity_list, key=lambda x: x[0], reverse=True)]) if similarity_list else ""
 				formatted_potential_matches = ", ".join(potential_matches) if potential_matches else None
 
 				# Update the pandas DataFrame
