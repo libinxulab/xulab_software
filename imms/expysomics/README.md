@@ -104,7 +104,7 @@ Finally, `RawProcessor.extract` creates two folders in the root directory (if th
 # function 1 contains MS1 data
 # function 2 contains mobility data
 # utilize a +/- 0.025 Da mass tolerance 
-data = RawProcessor.extract("path/to/calibration/file.xlsx", 1, 2, 0.025)
+data.extract("path/to/calibration/file.xlsx", 1, 2, 0.025)
 ```
 
 ## `expysomics.query`
