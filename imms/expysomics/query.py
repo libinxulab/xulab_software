@@ -10,7 +10,6 @@
 		This module is currently designed to query SQLite CCS and fragmentation reference databases and 
 		accepts the output of expysomics/process.py.
 """
-
 import pandas as pd 
 import sqlite3
 import numpy as np
