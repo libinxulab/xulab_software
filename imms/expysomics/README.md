@@ -1,6 +1,7 @@
 ## xulab_software/imms/expysomics
 
-This Python package is intended to facilitate the integration of data independent (DIA) IM-MS/MS data into nontarget and suspect screening workflows. The current version of `expysomics` supports the detection and identification of quaternary ammonium compounds (QACs) and their phase I hepatic metabolites in human biological samples; the complete QAC reference database referred to herein is available at https://ccsbase.net/qac. Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `expysomics` package. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
+This Python package is intended to facilitate the efficient integration of multi-dimensional, data independent (DIA) IM-MS/MS data into suspect screening workflows. The current version of `expysomics` supports the detection and identification of quaternary ammonium compounds (QACs) and their phase I hepatic metabolites in human biological samples; the complete QAC reference database referred to herein is available at https://ccsbase.net/qac. Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `expysomics` package. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
+
 * `cdt.dll`
 * `MassLynxLockMassProcessor.py`
 * `MassLynxRaw.dll`
@@ -51,22 +52,38 @@ from expysomics.process import RawProcessor
 # initialize RawProcessor object 
 data = RawProcessor("path/to/target/list.xlsx")
 ```
-In the current version of `expysomics`, the target list **must** contain the following headers and information:
+In the current version of `expysomics`, the target list **must** contain the following headers:
 
-| file_name | mz    | sample_type | ccs_calibrant | gradient             | column_type |   
-| ----------|:-----:|:-----------:|:-------------:|:--------------------:|:-----------:|
-| file1.raw | 100.4 | control     | polyala       | develop_20min_5B_85B | Kinetex_C8  |
-| file2.raw | 100.4 | sample      | polyala       | develop_20min_5B_85B | Kinetex_C8  |
+| File Name | Target m/z | Sample Type | CCS Calibrant | Gradient             | Column Type |   
+| ----------|:----------:|:-----------:|:-------------:|:--------------------:|:-----------:|
+| file1.raw | 100.4      | control     | polyala       | develop_20min_5B_85B | Kinetex_C8  |
+| file2.raw | 100.4      | sample      | polyala       | develop_20min_5B_85B | Kinetex_C8  |
 
+1. **File Name**: path to the Waters .raw files to be processed
+2. **Target m/z**: list of all the target m/z values used to extract spectral features
+3. **Sample Type**: indicate whether the Waters .raw file being processed is an experimental "control," "sample," or an internal standard "IS" 
+4. **CCS Calibrant**: indicate whether the type of CCS calibrant used is "polyala," "drugs," or "agilent"
+5. **Gradient**: indicate the type of LC gradient used
+6. **Columm Type**: indicate the type of LC column used
 
-1. **file_name**: path to the Waters .raw files to be processed
-2. **mz**: list of all the target m/z values used to extract spectral features
-3. **sample_type**: indicate whether the Waters .raw file being processed is an experimental "control" or a "sample" 
-4. **ccs_calibrant**: indicate whether the type of CCS calibrant used is "polyala," "drugs," or "agilent"
-5. **gradient**: indicate the type of LC gradient used
-6. **column_type**: indicate the type of LC column used
+A template spreadsheet for creating the target m/z list is provided within this repository for convenience.
 
-A template spreadsheet is provided within this repository for convenience.
+In addition to the required target m/z list, the `RawProcessor` object may also be initialized with the path to an optional Excel (.xlsx) spreadsheet containing reference retention times and CCS values for internal standards or quality control compounds:
+
+```python
+from expysomics.process import RawProcessor
+
+# initialize RawProcessor object with additional reference retention time and CCS list for quality control purposes
+data = RawProcessor("path/to/target/list.xlsx", "optional/path/to/reference/list.xlsx")
+```
+If included, the reference list **must** contain the following headers:
+
+| Exact m/z | Internal Standard | Gradient              | Reference Retention Time (min) | Reference CCS (Å²)   |        
+| ----------|:-----------------:|:---------------------:|:------------------------------:|:--------------------:|
+| 283.3126  | d7-C10-BAC        | develop_20min_5B_85B  | 10.02                          | 179.4                | 
+| 311.3439  | d7-C12-BAC        | develop_20min_5B_85B  | 11.57                          | 189.76               | 
+
+A template spreadsheet for creating the reference list is provided within this repository for convenience. 
 
 ### Methods
 `RawProcessor.extract`
@@ -82,19 +99,23 @@ This is the primary method for extracting data from .raw files for downstream an
 To convert extracted drift times into calibrated CCS values, the path to an Excel (.xlsx) spreadsheet with the following information must be indicated:
 1. **observed calibrant m/z vaues**: list of the observed m/z values for a set of CCS calibrants
 2. **reference CCS values**: literature CCS values of the calibrants used 
+3. **path to the Waters .raw file**: indicated by the sheet name
 
-An example CCS calibrant spreadsheet is provided within this repository.
+A template spreadsheet for creating the CCS calibrant list is provided within this repository for convenience. 
 
 #### Returns
 Excel (.xlsx) spreadsheet containing the following extracted data for each target m/z:
 
-* monoisotopic_mz: m/z value of the monoisotopic peak (method adapted from MetaboAnnotatoR)
-* dt: retention time-selected drift time (if available)
-* ccs: calibrated CCS value (if drift time is available)
-* rt: retention time 
-* peak_area: peak area of the extracted LC ion chromatogram
+* Observed m/z: m/z value of the identified monoisotopic peak (method adapted from MetaboAnnotatoR)
+* Observed Drift Time (ms): retention time-selected drift time (if available)
+* Observed CCS (Å²): calibrated CCS value (if drift time is available)
+* Observed Retention Time (min): retention time 
+* EIC Peak Intensity: maximum peak height of the extracted LC ion chromatogram
+* EIC Peak Area: peak area of the extracted LC ion chromatogram
 
-If the input target list contains the paths to .raw files corresponding to a blank control, `RawProcessor.extract` returns an additional Excel (.xlsx) spreadsheet containing filtered spectral features (i.e., those that are unique to samples based on LC ion chromatogram peak area).
+If the `RawProcessor` object is initialized with the path to a reference list, the output spreadsheet will also flag internal standard (IS) features that deviate significantly (greater than 0.2 minutes and 3% for retention time and CCS, respectively) from the reference values. This functionality provides a simple method for assessing the quality and reproducibility of the chromatographic and mobility separations. The current version of `expysomics` does not support automatic retention time correction.
+
+Additionally, if the input target list contains the paths to .raw files corresponding to a blank control, `RawProcessor.extract` returns an additional Excel (.xlsx) spreadsheet containing filtered spectral features (i.e., those that are unique to samples based on LC ion chromatogram peak area). An additional column will also be displayed that indicates the EIC peak area ratio between the sample and the corresponding control features. 
 
 Finally, `RawProcessor.extract` creates two folders in the root directory (if they do not already exist) called "Extracted Chromatograms" and "Extracted Mobilograms" where .png images of the extracted, smoothed, and fitted data will be saved.
 
@@ -131,19 +152,24 @@ from expysomics.query import FeatureAnnotate
 matches = FeatureAnnotate("path/to/feature/list.xlsx", "path/to/reference/db.db" "optional/path/to/spectral/db.db")
 ```
 
+Note that the QAC reference and spectral databases are included within this repository for accessibility.
+
 The current version of `expysomics` is set up to accept the output file of `RawProcessor.extract` without further modifications. To utilize this module with custom datasets, the spectral feature list **must** contain the following headers and information: 
 
-1. **file_name**: path to the Waters .raw files to be processed
-2. **mz**: list of all the target m/z values used to extract spectral features
-3. **sample_type**: indicate whether the Waters .raw file being processed is an experimental "control" or a "sample" 
-	* note that only spectral features identified as "sample" will be matched
-4. **ccs_calibrant**: indicate whether the type of CCS calibrant used is "polyala," "drugs," or "agilent"
-5. **gradient**: indicate the type of LC gradient used
-6. **column_type**: indicate the type of LC column used
-7. **dt**: drift time of the spectral feature
-8. **ccs** calibrated CCS value of the spectral feature
-9. **rt** retention time of the spectral feature
-10. **peak_area** peak area of the extracted LC ion chromatogram
+1. **File Name**: path to the Waters .raw files to be processed
+2. **Sample Type** indicate whether the Waters .raw file being processed is an experimental "control" or a "sample"
+3. **Gradient** indicate the type of LC gradient used
+4. **Column Type** indicate the type of LC column used
+5. **Target m/z** list of all the target m/z values used to extract spectral features
+	* note that only spectral features identified as "sample" will be matched against the database
+6. **Observed m/z** m/z value of the identified monoisotopic peak
+7. **CCS Calibrant**: indicate whether the type of CCS calibrant used is "polyala," "drugs," or "agilent"
+8. **Observed Drift Time (ms)**: drift time of the spectral feature
+9. **Observed CCS (Å²)** calibrated CCS value of the spectral feature
+10. **Observed Retention Time (min)** retention time of the spectral feature
+11. **EIC Peak Intensity** maximum peak height of the extracted LC ion chromatogram
+12. **EIC Peak Area** peak area of the extracted LC ion chromatogram
+13. **EIC Peak Area Ratio** ratio, if available, between the peak area of the sample feature and the corresponding control feature (i.e., the factor by which the sample feature peak area is above the control)
 
 ### Methods
 `FeatureAnnotate.match_features`

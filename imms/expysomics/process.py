@@ -1,3 +1,15 @@
+"""
+	expysomics/process.py
+	Ryan Nguyen
+
+	description:
+		Module designed to handle the extraction and basic processing of raw LC-IM-MS data. 
+		Provides a comprehensive set of tools for extracting data from .raw files,
+		peak detection in both the time and m/z dimensions, Gaussian fittin, and automatic 
+		conversion of drift times to calibrated collision cross-section (CCS) values.
+		This module may be used on its own to extract data or in combination with expysomics/query.py for 
+		downstream analysis.
+"""
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
@@ -8,17 +20,17 @@ from matplotlib import pyplot as plt
 from matplotlib import rcParams
 from dhrmasslynxapi.reader import MassLynxReader
 from dhrmasslynxapi.ccs_calibration import CCSCalibrationRawXL
-from multigauss import process_data
+from multigauss import process_chromatogram
 from filter import filter_data
 
 # Set global font conditions for figures
 params = {"font.size": 8,
-         "font.family": "Arial",
-          "font.weight": "bold"}
+		 "font.family": "Arial",
+		  "font.weight": "bold"}
 plt.rcParams.update(params)
 
 class RawProcessor:
-	def __init__(self, target_list):
+	def __init__(self, target_list, reference_is_file=None):
 		"""
 		RawProcessor.__init__
 		description:
@@ -26,8 +38,12 @@ class RawProcessor:
 			paths to .raw data files.
 		parameters:
 			target_list (str) -- path to the Excel file (.xlsx) containing the target list.
+			reference_is_list (str) -- path to th Excel file (.xlsx) containing the reference internal standard list (optional).
 		"""
 		self.target_list = target_list
+		self.reference_is_df = None
+		if reference_is_file:
+			self.read_reference_is(reference_is_file)
 		self.output_rows = []
 
 	def peak_fit(self, t, dt_i, p0="guess"):
@@ -36,8 +52,8 @@ class RawProcessor:
 		description:
 			Fits a peak in the EIM to a Gaussian curve.
 		parameters:
-			t (array) -- drift times.
-			dt_i (array) -- intensity  values corresponding to the drift times.
+			t (list or numpy.ndarray) -- drift times.
+			dt_i (list or numpy.ndarray) -- intensity  values corresponding to the drift times.
 			p0 (tuple/str) -- initial guesses for the Gaussian parameters.
 		returns:
 			(array) -- optimal values for the Gaussian parameters.
@@ -45,6 +61,7 @@ class RawProcessor:
 		if p0 == "guess":
 			p0 = (max(dt_i), t[np.argmax(dt_i)], 0.5)
 		opt, cov = curve_fit(self.gaussian_fit, t, dt_i, maxfev=5000, p0=p0)
+
 		return opt
 
 	def gaussian_fit(self, x, A, B, C):
@@ -62,6 +79,7 @@ class RawProcessor:
 		"""
 		if abs(C) < 0.01:
 			C = 0.01
+
 		return A * np.exp(-(x - B) ** 2 / (2 * C ** 2))
 
 	def fwhm_threshold(self, C, dt_i, fwhm_thresholds=(0.05, 2.5), intensity_threshold=500):
@@ -80,6 +98,7 @@ class RawProcessor:
 		"""
 		fwhm = C * 2.355
 		max_intensity = max(dt_i)
+
 		return fwhm_thresholds[0] < fwhm < fwhm_thresholds[1] and max_intensity > intensity_threshold
 
 	def atd(self, t, t_refined, dt_i, fit_i, A, B, title_atd, fname_atd):
@@ -88,10 +107,10 @@ class RawProcessor:
 		description:
 			Generates a plot of the raw EIM and the Gaussian fit.
 		parameters:
-			t (array) -- raw EIM time points.
-			t_refined (array) -- refined data points for plotting the fit.
-			dt_i (array) -- original intensity values.
-			fit_i (array) -- intensity values of the fitted curve.
+			t (list or numpy.ndarray) -- raw EIM time points.
+			t_refined (list or numpy.ndarray) -- refined data points for plotting the fit.
+			dt_i (list or numpy.ndarray) -- original intensity values.
+			fit_i (list or numpy.ndarray) -- intensity values of the fitted curve.
 			A, B (floats) -- Gaussian parameters.
 			title_atd (str) -- title for the plot.
 			fname_atd (str) -- file name for saving the plot. 
@@ -128,15 +147,31 @@ class RawProcessor:
 		"""
 		RawProcessor.export_to_excel
 		description:
-			Exports the extracted data to an Excel (.xlsx) file.
+			Exports the extracted data to an Excel file (.xlsx). 
 		returns:
-		(str) -- path to the output Excel (.xlsx) file.
+		(str) -- path to the output Excel file (.xlsx).
 		"""
-		df_output = pd.DataFrame(self.output_rows, columns=["file_name", "mz", "sample_type", "ccs_calibrant", "gradient", "column_type", "monoisotopic_mz", "dt", "ccs", "rt", "peak_area"])
-		output_file = self.target_list[:-5] + "_processed.xlsx"
+		df_output = pd.DataFrame(self.output_rows, columns=["File Name", "Sample Type", "Gradient", "Column Type", "Target m/z", "Observed m/z", "CCS Calibrant",  "Observed Drift Time (ms)", "Observed CCS (Å²)", "Observed Retention Time (min)", "EIC Peak Intensity", "EIC Peak Area"])
+		base_name = os.path.splitext(os.path.basename(self.target_list))[0]
+		output_file = "{}_processed.xlsx".format(base_name)
 		df_output.to_excel(output_file, index=False)
-		print("\nProcessing successful. View results in {}".format(output_file))
+		print("\nProcessing successful. View results in {}.".format(output_file))
+
 		return output_file
+
+	def read_reference_is(self, reference_is_file):
+		"""
+		RawProcessor.read_reference_is
+		description:
+			Reads and stores the reference internal standards Excel file.
+		parameters:
+			reference_file (str) -- path to the Excel file (.xlsx) containing the reference IS list.
+		"""
+		self.reference_is_df = pd.read_excel(reference_is_file)
+		self.reference_is_dict = {}
+		for _, row in self.reference_is_df.iterrows():
+			key = (row["Exact m/z"], row["Gradient"])
+			self.reference_is_dict[key] = {"Reference Retention Time (min)": row["Reference Retention Time (min)"], "Reference CCS (Å²)": row["Reference CCS (Å²)"]}
 
 	def filter_data(self):
 		"""
@@ -144,64 +179,110 @@ class RawProcessor:
 		description:
 			Filters the extracted data to identify unique spectral features based on LC peak intensity. 
 		returns:
-		(str) -- The path to the filtered output Excel (.xlsx) file.
+		(str) -- The path to the filtered output Excel file (.xlsx).
 		"""
 		# Read the input Excel file containing extracted data, i.e., the output of RawProcess.extract
 		df = pd.read_excel(self.output_file)
 
-		# Filter rows where sample_type = sample
-		sample_rows = df[df["sample_type"] == "sample"]
+		# Convert retention time values to floats and strip out any flags
+		df["Observed Retention Time (min)"] = df["Observed Retention Time (min)"].apply(lambda x: float(x.split()[0]) if isinstance(x, str) else x)
+
+		# Select rows where the sample type is "sample"
+		sample_rows = df[df["Sample Type"] == "sample"]
+
+		# Initialize empty list to store rows that meet the filtering criteria
 		unique_features = []
 
-		for _, sample_row in sample_rows.iterrows():
-			sample_mz = sample_row["mz"]
-			sample_rt = sample_row["rt"]
-			sample_peak_area = sample_row["peak_area"]
+		# Select rows where the same type is "control" for comparison
+		control_rows = df[df["Sample Type"] == "control"]
 
-			# Filter control rows with matching m/z and rt within +/- 0.1 min
-			control_rows = df[(df["sample_type"] == "control") & (df["mz"] == sample_mz) & (abs(df["rt"] - sample_rt) <=0.1)]
-			if len(control_rows) == 0:
+		# Iterate over each "sample" row to determine if it meets the filtering criteria
+		for index, sample_row in sample_rows.iterrows():
+			sample_mz = sample_row["Target m/z"]
+			sample_rt = sample_row["Observed Retention Time (min)"]
+			sample_peak_area = sample_row["EIC Peak Area"]
+
+			# Start with an empty DataFrame for matching control features
+			matching_controls = pd.DataFrame()
+
+			# Check if there are any control features with the same m/z
+			matching_mz_controls = control_rows[control_rows["Target m/z"] == sample_mz]
+
+			# If there are matching m/z control features, further filter them by retention time
+			if not matching_mz_controls.empty:
+				matching_controls = matching_mz_controls[abs(matching_mz_controls["Observed Retention Time (min)"] - sample_rt) <= 0.1]
+
+			# Handle case where there are no control features that match by m/z and retention time, or if the sample peak area is greater than the max control feature peak 
+			if matching_controls.empty or (sample_peak_area > 1.5 * matching_controls["EIC Peak Area"].max()):
+
+				# Assign a peak area ratio if matching control features are found
+				if not matching_controls.empty:
+					sample_row["Control EIC Peak Area Ratio"] = sample_peak_area / matching_controls["EIC Peak Area"].max()
+				else:
+
+					# Handle case where there are no matching control features
+					sample_row["Control EIC Peak Area Ratio"] = ""
+
+				# Add the sample row to the list of unique features
 				unique_features.append(sample_row)
-			else:
-				control_peak_area = control_rows["peak_area"].max()
 
-				# Remove extracted features that have peak areas 1.5 times less than control features
-				if sample_peak_area > 1.5 * control_peak_area:
-					unique_features.append(sample_row)
-
-		# Export filtered spectral features to pandas DataFrame
+		# Create a pandas DataFrame with the unique features
 		df_output = pd.DataFrame(unique_features)
-		filtered_file = self.output_file[:-15] + "_filtered.xlsx"
 
-		# Export pandas DataFrame to Excel (.xlsx) file
+		# Define the output file name
+		filtered_file = self.output_file.replace("_processed.xlsx", "_filtered.xlsx")
+
+		# Export the DataFrame to an Excel file
 		df_output.to_excel(filtered_file, index=False)
-		print("\nFiltering sucessful. View results in {}\n".format(filtered_file))
+		print("\nFiltering successful. View results in {}\n".format(filtered_file))
 
-	def monoisotopic_peak(self, mz_values, intensities, target_mz, tolerance=3):
+		return filtered_file
+
+	def gaussian_smooth_pick(self, mz_array, intensity_array, window_len=1, std=7, prominence=0.1):
+		"""
+		FeatureAnnotate.gaussian_smooth_pick
+		description:
+			Applies a Gaussian smoothing to the intensity array and identifies peaks.
+			This function convolves the intensity array with a Gaussian window to smooth the data.
+			It then identifies local maxima (i.e., peaks) in the smoothed data based on a defined prominence.
+		parameters:
+			mz_array (array-like): array of m/z values corresponding to the intensities.
+			intensity_array (array-like): array of intensity values to be smoothed and from which peaks are identified.
+			window_len (int) -- length of the gaussian window used for smoothing. Default is 1.
+			std (float) -- standard deviation of the Gaussian window, controlling the degree of smoothing. Default is 7.
+			prominence (float) -- minimum prominence of peaks to be identified. Default is 0.1
+		returns:
+			(tuple) -- a tuple containing identified peaks and smoothed intensity array.
+		"""
+		window = gaussian(window_len, std=std)
+		smoothed_intensity = convolve(intensity_array, window/window.sum(), mode="same")
+		peaks, _ = find_peaks(smoothed_intensity, prominence=prominence)
+		identified_peaks = [(mz_array[p], smoothed_intensity[p]) for p in peaks]
+
+		return identified_peaks, smoothed_intensity
+
+	def monoisotopic_peak(self, identified_peaks, target_mz, tolerance=0.025):
 		"""
 		RawProcessor.monoisotopic_peak
 		description:
 			Identifies the monoisotopic peak within the target rt-selected MS1 spectrum.
-			The current implementation only considers carbon isotopes around a M+3 window. 
-			Method adapted from MetaboAnnotatoR (Ebbels et al., 2022)
+			The current implementation only considers the M+0 peak because all QACs carry 
+			a permanent positive charge.
 		parameters:
-			mz_values (array) -- extracted m/z values from the MS1 function.
-			intensities (array) -- corresponding intensity values from the MS1 function.
+			identified_peaks (tuple) -- extracted and "centroided" MS1 peaks 
 			target_mz (float) -- target precursor m/z value to compare with extracted peaks.
-		returns:
+			tolerance (float) -- tolerance around the target m/z vakue to consider.
 			(float) -- extracted m/z value of the monoisotopic peak. 
 		"""
 		# Identify the peaks from the extracted MS1 function that fall within the M+3 window
-		potential_peaks = [(mz, intensity) for mz, intensity in zip(mz_values, intensities) if target_mz - tolerance <= mz <= target_mz]
+		potential_peaks = [(mz, intensity) for mz, intensity in identified_peaks if target_mz - tolerance <= mz <= target_mz + tolerance]
 		if not potential_peaks:
 			return target_mz
 
 		# Find the peak with the highest intensity within the tolerance window
 		highest_intensity_peak = max(potential_peaks, key=lambda x: x[1])
 
-		# If the target m/z has the highest intensity, it's assumed to be the monoisotopic peak
-		# Otherwise, return the m/z of the highest intensity peak
-		return target_mz if highest_intensity_peak[0] == target_mz else highest_intensity_peak[0]
+		return highest_intensity_peak[0]
 
 	def extract(self, calibration_file, ms1_function, mobility_function, mz_tolerance):
 		"""
@@ -230,12 +311,15 @@ class RawProcessor:
 		if not os.path.exists(mobilogram_directory):
 			os.makedirs(mobilogram_directory)
 
+		# Initialize dictionary for internal standard CCS flags
+		ccs_flags = {}
+
 		# Iterate over each row in the target list DataFrame
 		print("\n...CCS Calibration successful. Extracting data from the raw files using precursor target list {}...".format(self.target_list))
 		for i, row in df_input.iterrows():
 
 			# Extract the path to .raw file, m/z, and sample type (i.e., sample or blank)
-			file_name, mz, sample_type = row["file_name"], row["mz"], row["sample_type"]
+			file_name, mz, sample_type, gradient = row["File Name"], row["Target m/z"], row["Sample Type"], row["Gradient"]
 
 			# Print the current m/z being queried to the terminal
 			print("\n\traw file: {} m/z: {}".format(file_name, mz))
@@ -250,21 +334,44 @@ class RawProcessor:
 			rt_i = np.array(rt_i)
 
 			# Smooth and fit EIC with multigauss module
-			peak_indices, rt_list, areas = process_data(rt, rt_i, file_name, mz, sample_type)
+			peak_indices, rt_list, areas, peak_ranges = process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=True)
 
 			# Iterate over each extracted LC ion chromatogram peak
-			for rt_value, peak_area in zip(rt_list, areas):
+			for rt_value, peak_area, (start_idx, end_idx) in zip(rt_list, areas, peak_ranges):
+				if sample_type =="IS":
+
+					# Create a key for looking up the reference retention time based on m/z and gradient type
+					ref_rt_key = (mz, gradient)
+
+					# If the key is in the reference dictionary, check against the reference retention time
+					if ref_rt_key in self.reference_is_dict:
+						reference_rt = self.reference_is_dict[ref_rt_key]["Reference Retention Time (min)"]
+
+						# Calculate the difference between observed and reference retention times
+						rt_difference = abs(float(rt_value) - reference_rt)
+
+						# Flag the retention time if difference is greater than 0.2 min
+						if rt_difference > 0.2:
+							rt_value = f"{rt_value} FLAG"
+
+				# Use peak indices to define the window
+				rt_start = rt[start_idx]
+				rt_end = rt[end_idx]
 
 				# Extract MS1 spectrum for isotopologue check
-				mz_spectrum, intensity_spectrum = rdr.get_spectrum(ms1_function, float(rt_value) - 0.01, float(rt_value) + 0.01)
+				mz_spectrum, intensity_spectrum = rdr.get_spectrum(ms1_function, rt_start, rt_end)
 
-				# Identify the monoisotopic peak
-				monoisotopic_mz = self.monoisotopic_peak(mz_spectrum, intensity_spectrum, float(mz))
+				# Smooth and fit the extracted MS1 spectrum using Gaussian convolution 
+				# This process is analogous to "centroiding" the profile data as outlined in MSnbase
+				# The default parmaeters for the smoothing and picking (i.e., window_len=1, std=7, prominence=0.01) select the most intense peak for each ion distribution
+				# More aggressive smoothing will lead to slightly different m/z peaks being picked
+				identified_peaks, smoothed_intensity = self.gaussian_smooth_pick(mz_spectrum, intensity_spectrum)
 
+				# Identify the monoisotopic peak in the MS1 centroided data
+				monoisotopic_mz = self.monoisotopic_peak(identified_peaks, float(mz))
 
-				# Extract (m/z,rt)-selected ion mobilogram (EIM) for each identified LC peak using +/- 0.1 min window
-				t, dt_i = rdr.get_filtered_chrom(self.mobility_function, float(mz), self.mz_tolerance, rt_min=float(rt_value)-0.1, rt_max=float(rt_value)+0.1)
-
+				# Extract (m/z,rt)-selected ion mobilogram (EIM) for each identified LC peak 
+				t, dt_i = rdr.get_filtered_chrom(self.mobility_function, float(mz), self.mz_tolerance, rt_min=rt_start, rt_max=rt_end)
 				dt = None
 
 				# Smooth and fit EIM to Gaussian function
@@ -283,22 +390,53 @@ class RawProcessor:
 					ccs = self.cal_data.calibrated_ccs(mz, dt)
 					ccs = round(ccs, 2)
 
+					# Check if sample is an internal standard
+					if sample_type == "IS":
+
+						# Create a key for looking up the reference CCS based on m/z (and gradient)
+						ref_ccs_key = (mz, gradient)
+
+						# If the key is in the reference dictionary, check against the reference CCS value
+						if ref_ccs_key in self.reference_is_dict:
+							reference_ccs = self.reference_is_dict[ref_ccs_key]["Reference CCS (Å²)"]
+
+							# Calculate the percentage difference between observed and reference CCS
+							ccs_difference = abs(ccs - reference_ccs) / reference_ccs
+
+							# Flag the CCS if the difference is greater than 3%
+							if ccs_difference > 0.03:
+								ccs_flags[ccs] = "FLAG"
+				else:
+					ccs = None
+
+				# Calculate the EIC peak height (i.e., max intensity)
+				peak_height = max(rt_i[start_idx:end_idx+1])
+
 				# Append the extracted data to output_rows list
-				self.output_rows.append([file_name, mz, sample_type, row["ccs_calibrant"], row["gradient"], row["column_type"], monoisotopic_mz, dt, ccs, rt_value, peak_area])
+				flag_status = ccs_flags.get(ccs, "")
+				ccs_output = "" if ccs is None else f"{ccs} {flag_status}".strip()
+				self.output_rows.append([file_name, sample_type, row["Gradient"], row["Column Type"], mz, monoisotopic_mz, row["CCS Calibrant"], dt, ccs_output, rt_value, peak_height, peak_area])
 
 				# Generate title for EIM figure
 				fwhm = C * 2.355
 				title_atd = "Extracted Mobilogram ({}) \nm/z: {:.4f} \u00B1 0.025 rt: {} → FWHM ~ {:.2f} ms".format(file_name, mz, rt_value, fwhm)
 
-				# Generate file name for EIM figure
-				fname_atd = "{}/{}_{}_{}_{}_EIM.png".format(mobilogram_directory, file_name, mz, rt_value, sample_type.capitalize()) # Change where mobilogram figures are saved
+				# Generate file name for EIM figure without the directory path
+				fname_suffix = "IS_EIM" if sample_type == "IS" else "EIM"
+				fname = "{}_{}_{}_{}.png".format(file_name, mz, rt_value, fname_suffix) 
+
+				# Replace spaces with underscores in the filename only
+				fname = fname.replace(" ", "_")
+
+				# Prepend the directory path to the filename
+				fname_atd = os.path.join(mobilogram_directory, fname)
 			
 				# Generate EIM figure
 				self.atd(t, t_refined, dt_i, fit_i, A, B, title_atd, fname_atd) # Comment out this code if figures are not needed
 		
-		# Export DataFrame containing extracted spectral features to Excel (.xlsx) file
+		# Export DataFrame containing extracted spectral features to Excel file (.xlsx) 
 		self.output_file = self.export_to_excel()
 
-		# Export DataFrame containing filtered spectral features to Excel (.xlsx) file
+		# Export DataFrame containing filtered spectral features to Excel file (.xlsx) 
 		self.filter_data()
 		 
