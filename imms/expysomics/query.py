@@ -24,10 +24,6 @@ from scipy.signal import convolve, gaussian, find_peaks
 from multigauss import process_chromatogram
 from dhrmasslynxapi.reader import MassLynxReader
 
-# TODO
-# Edit README to reflect new column titles and commit 
-# Upload corrected database files
-
 # Set global font conditions for figures
 params = {"font.family": "Arial",
 		  "font.weight": "bold"}

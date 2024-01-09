@@ -1,6 +1,7 @@
 ## xulab_software/imms/expysomics
 
-This Python package is intended to facilitate the efficient integration of data independent (DIA) IM-MS/MS data into suspect screening workflows. The current version of `expysomics` supports the detection and identification of quaternary ammonium compounds (QACs) and their phase I hepatic metabolites in human biological samples; the complete QAC reference database referred to herein is available at https://ccsbase.net/qac. Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `expysomics` package. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
+This Python package is intended to facilitate the efficient integration of multi-dimensional, data independent (DIA) IM-MS/MS data into suspect screening workflows. The current version of `expysomics` supports the detection and identification of quaternary ammonium compounds (QACs) and their phase I hepatic metabolites in human biological samples; the complete QAC reference database referred to herein is available at https://ccsbase.net/qac. Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `expysomics` package. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
+
 * `cdt.dll`
 * `MassLynxLockMassProcessor.py`
 * `MassLynxRaw.dll`
@@ -150,6 +151,8 @@ from expysomics.query import FeatureAnnotate
 # initialize FeatureAnnotate object 
 matches = FeatureAnnotate("path/to/feature/list.xlsx", "path/to/reference/db.db" "optional/path/to/spectral/db.db")
 ```
+
+Note that the QAC reference and spectral databases are included within this repository for accessibility.
 
 The current version of `expysomics` is set up to accept the output file of `RawProcessor.extract` without further modifications. To utilize this module with custom datasets, the spectral feature list **must** contain the following headers and information: 
 
