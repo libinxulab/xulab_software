@@ -1,6 +1,7 @@
 """
     expysomics.multigauss.py
     Ryan Nguyen
+    2/15/2024
 
     description:
         Module designed for processing time or m/z-intensity pairs.
@@ -17,7 +18,9 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks, gaussian, convolve
 from scipy.optimize import curve_fit
 
-def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=False): 
+# THIS VERSION IS UP TO DATE AS OF 2/14/24
+
+def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=False, prominence=1000, distance=3): 
     """
     expysomics/multigauss.py
     process_chromatogram
@@ -44,7 +47,7 @@ def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=F
     smoothed_intensity = convolve(rt_i, window/window.sum(), mode="same")
 
     # Identify peaks in the smoothed data
-    peak_indices, _ = find_peaks(smoothed_intensity, prominence=1500, distance=5) # Adjust peak picking filters
+    peak_indices, _ = find_peaks(smoothed_intensity, prominence=prominence, distance=distance) # Adjust peak picking filters (default: prominence=1000, distance=3)
 
     # Identify peak indices 
     peak_ranges = []
@@ -57,6 +60,24 @@ def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=F
         end_idx = peak_idx
         while end_idx < len(rt_i) - 1 and rt_i[end_idx + 1] < rt_i[end_idx]:
             end_idx += 1
+
+        # Handle cases where start_idx is equal to or greater than peak apex
+        if start_idx >= peak_idx:
+
+            # Scan earlier points to find the appropriate start index
+            new_start_idx = start_idx - 1
+            while new_start_idx > 0 and rt_i[new_start_idx - 1] <= rt_i[new_start_idx]:
+                new_start_idx -= 1
+            start_idx = new_start_idx
+
+        # Handle cases where end_idx is equal to or less than peak apex
+        if end_idx <= peak_idx:
+
+            # Scan later points to find the appropriate end index
+            new_end_idx = end_idx + 1
+            while new_end_idx < len(rt_i) - 1 and rt_i[new_end_idx + 1] <= rt_i[new_end_idx]:
+                new_end_idx += 1
+            end_idx = new_end_idx
         peak_ranges.append((start_idx, end_idx))
 
     # Add identified peaks to rt_list for output file
@@ -67,10 +88,10 @@ def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=F
         rt_list.append(round_label)
 
     # Extract mu (mean) values for the fixed Gaussian functions from the smoothed data
-    mu_values = rt[peak_indices]
+    mu_values = rt[peak_indices] if peak_indices.size > 0 else np.array([])
 
     # Initial guesses for amplitude (A) and sigma from the smoothed data
-    A_guesses = smoothed_intensity[peak_indices]
+    A_guesses = smoothed_intensity[peak_indices] if peak_indices.size > 0 else np.array([])
     sigma_guesses = [0.05] * len(peak_indices)
     p0 = [val for sublist in zip(A_guesses, sigma_guesses) for val in sublist]
 
@@ -80,7 +101,8 @@ def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=F
         for i in range(0, len(params), 2):
             A = params[i]
             sigma = params[i + 1]
-            y += A * np.exp(-((x - mu_values[int(i/2)])**2) / (2 * sigma**2))
+            mu = mu_values[int(i / 2)] if len(mu_values) > int(i / 2) else 0
+            y += A * np.exp(-((x - mu) **2) / (2 * sigma ** 2))
         return y
 
     # Generate a new folder called  "Extracted Chromatograms" in the directory if not already present
@@ -89,61 +111,80 @@ def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=F
         os.makedirs(chromatogram_directory)
 
     # Attempt to fit the smoothed data to a multi-Gaussian function      
-    areas = []     
+    areas = []   
     try:
-        popt_multi_gaussian, _ = curve_fit(multi_gaussian_fixed_mu, rt, rt_i, p0=p0, maxfev=20000)
-        for i in range(0, len(popt_multi_gaussian), 2):
-            A = popt_multi_gaussian[i]
-            sigma = popt_multi_gaussian[i + 1]
-            mu = mu_values[int(i/2)]
-            area = A * sigma * np.sqrt(2 * np.pi)  # Gaussian integral
-            areas.append(area)
+        if peak_indices.size > 0:
+            popt_multi_gaussian, _ = curve_fit(multi_gaussian_fixed_mu, rt, rt_i, p0=p0, maxfev=20000)
+            for i in range(0, len(popt_multi_gaussian), 2):
+                A = popt_multi_gaussian[i]
+                sigma = popt_multi_gaussian[i + 1]
+                mu = mu_values[int(i/2)]
+                area = A * sigma * np.sqrt(2 * np.pi)  # Gaussian integral
+                areas.append(area)
+        else:
+            popt_multi_gaussian = []
+    except Exception as e:
+        areas = [None] * len(peak_indices)
+        popt_multi_gaussian = []
 
-        # Check if image generation is requored
-        if generate_images:
+    # Check if image generation is required
+    if generate_images:
 
-            # Set up LC chromatogram figure for successfully fitted EICs
-            suffix = "_IS_EIC" if sample_type == "IS" else f"_{sample_type.capitalize()}_EIC"
-            title_lc = f"Extracted Chromatogram ({file_name}) \nm/z: {mz:.4f} \u00B1 0.025"
-            fname_lc = f"{chromatogram_directory}/{file_name}_{mz}_{suffix}.png"
-            fig, ax = plt.subplots(figsize=(6.4, 4.8))
-            ax.plot(rt, rt_i, "b-", lw=1.5, label="Raw Data") # Plot raw EIC
-            ax.plot(rt, smoothed_intensity, "g--", lw=1.5, label="Smoothed Data") # Plot smoothed data
+        # Set up LC chromatogram figure for successfully fitted EICs
+        suffix = "_IS_EIC" if sample_type == "IS" else f"{sample_type.capitalize()}_EIC"
+        title_lc = f"Extracted Chromatogram ({file_name}) \nm/z: {mz:.4f} \u00B1 0.025"
+        fname_lc = f"{chromatogram_directory}/{file_name}_{mz}_{suffix}.png"
+        fig, ax = plt.subplots(figsize=(6.4, 4.8))
+        ax.plot(rt, rt_i, "b-", lw=1.5, label="Raw Data") # Plot raw EIC
+        ax.plot(rt, smoothed_intensity, "g--", lw=1.5, label="Smoothed Data") # Plot smoothed data
+
+        # Condition to plot if peaks were successfully fitted
+        if len(peak_indices) > 0:
             ax.plot(rt, multi_gaussian_fixed_mu(rt, *popt_multi_gaussian), "r-", lw=1.5, label="Gaussian Fit") # Plot fitted data
-            y_values = multi_gaussian_fixed_mu(rt[peak_indices], *popt_multi_gaussian)
-            for j in peak_indices:
-                label = str(rt[j])
-                plt.annotate(label[:4], xy=(rt[j], rt_i[j]), xytext=(rt[j]+0.04, rt_i[j] * 0.95), fontsize=10, fontweight="bold", fontname="Arial") # Annotate rt
-            plt.scatter(rt[peak_indices], y_values, color="purple", marker="*", s=40, label="Identified Peaks") # Mark identified peaks with a star
-            title_fontprops = {"fontsize": 12, "fontweight": "bold", "fontname": "Arial"} 
-            axes_label_fontprops = {"fontsize": 12, "fontweight": "bold", "fontname": "Arial"}
-            tick_label_fontprops = {"weight": "bold", "family": "Arial", "size": 10}
-            ax.set_title(title_lc, **title_fontprops)
-            ax.set_xlabel("Retention Time [min]", **axes_label_fontprops)
-            ax.set_ylabel("Intensity", **axes_label_fontprops)  
-            legend = ax.legend(loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white") # Create legend
-            for text in legend.get_texts():
-                text.set_fontname("Arial")
-            ax.tick_params(axis="both", which="major", labelsize=10, width=1)
-            for label in ax.get_xticklabels():
-                label.set_fontname("Arial")
-                label.set_fontweight("bold")
-                label.set_fontsize(10)
-            max_intensity_y_limit = max(rt_i) + 0.1 * max(rt_i)
-            y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)  # Generate 10 evenly spaced tick values
-            ax.set_yticks(y_tick_values)
-            ax.set_yticklabels([int(y) for y in y_tick_values], fontdict=tick_label_fontprops)
-            ax.set_ylim(0, max_intensity_y_limit) # Modify y axis range
-            plt.xlim(rt[peak_indices[0]] - 1, rt[peak_indices[-1]] + 1) # Modify x axis range
-            ax.spines["top"].set_visible(False)
-            ax.spines["right"].set_visible(False)
-            ax.spines["left"].set_linewidth(1.5)
-            ax.spines["bottom"].set_linewidth(1.5)
-            plt.tight_layout()
-            plt.savefig(fname_lc, dpi=350, bbox_inches="tight")
-            plt.close()
 
-    # Set up LC chromatogram figure for data that cannot be fit 
+        # Condition to plot if no peaks were detected or fitting fails
+        if len(peak_indices) == 0 or popt_multi_gaussian == []:
+            max_rt = rt[np.argmax(rt_i)]
+            ax.set_xlim(max_rt - 4, max_rt + 4)
+        else:
+            ax.set_xlim(rt[peak_indices[0]] - 1, rt[peak_indices[-1]] + 1)
+        """for start_idx, end_idx in peak_ranges:
+            ax.axvline(rt[start_idx], color='cyan', linestyle='--', lw=1)  # Start index line
+            ax.axvline(rt[end_idx], color='magenta', linestyle='--', lw=1)"""  # End index line   
+        y_values = multi_gaussian_fixed_mu(rt[peak_indices], *popt_multi_gaussian)
+        for j in peak_indices:
+            label = str(rt[j])
+            plt.annotate(label[:4], xy=(rt[j], rt_i[j]), xytext=(rt[j]+0.04, rt_i[j] * 0.95), fontsize=10, fontweight="bold", fontname="Arial") # Annotate rt
+        plt.scatter(rt[peak_indices], y_values, color="purple", marker="*", s=40, label="Identified Peaks") # Mark identified peaks with a star
+        title_fontprops = {"fontsize": 12, "fontweight": "bold", "fontname": "Arial"} 
+        axes_label_fontprops = {"fontsize": 12, "fontweight": "bold", "fontname": "Arial"}
+        tick_label_fontprops = {"weight": "bold", "family": "Arial", "size": 10}
+        ax.set_title(title_lc, **title_fontprops)
+        ax.set_xlabel("Retention Time [min]", **axes_label_fontprops)
+        ax.set_ylabel("Intensity", **axes_label_fontprops)  
+        legend = ax.legend(loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white") # Create legend
+        for text in legend.get_texts():
+            text.set_fontname("Arial")
+        ax.tick_params(axis="both", which="major", labelsize=10, width=1)
+        for label in ax.get_xticklabels():
+            label.set_fontname("Arial")
+            label.set_fontweight("bold")
+            label.set_fontsize(10)
+        max_intensity_y_limit = max(rt_i) + 0.1 * max(rt_i)
+        y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)  # Generate 10 evenly spaced tick values
+        ax.set_yticks(y_tick_values)
+        ax.set_yticklabels([int(y) for y in y_tick_values], fontdict=tick_label_fontprops)
+        ax.set_ylim(0, max_intensity_y_limit) # Modify y axis range
+        """plt.xlim(rt[peak_indices[0]] - 1, rt[peak_indices[-1]] + 1)""" # Modify x axis range
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_linewidth(1.5)
+        ax.spines["bottom"].set_linewidth(1.5)
+        plt.tight_layout()
+        plt.savefig(fname_lc, dpi=350, bbox_inches="tight")
+        plt.close()
+
+    """# Set up LC chromatogram figure for data that cannot be fit 
     except RuntimeError:
         if generate_images:
             title_lc = "Extracted Chromatogram ({}) \nm/z: {:.4f} \u00B1 0.025".format(file_name, mz)
@@ -180,7 +221,7 @@ def process_chromatogram(rt, rt_i, file_name, mz, sample_type, generate_images=F
             plt.tight_layout()
             plt.savefig(fname_lc, dpi=350, bbox_inches="tight")
             plt.close() 
-            return [], [], [], []
+            return [], [], [], []"""
 
     return peak_indices, rt_list, areas, peak_ranges
 

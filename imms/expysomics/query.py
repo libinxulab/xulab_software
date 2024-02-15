@@ -1,6 +1,7 @@
 """
 	expysomics/query.py
 	Ryan Nguyen
+	2/15/2024
 
 	description:
 		Module designed for the annotation of spectral features.
@@ -15,6 +16,7 @@ import sqlite3
 import numpy as np
 import math
 import os
+import re
 from matplotlib import pyplot as plt
 from matplotlib import rcParams
 from matplotlib.lines import Line2D
@@ -22,6 +24,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import convolve, gaussian, find_peaks
 from multigauss import process_chromatogram
 from dhrmasslynxapi.reader import MassLynxReader
+from brainpy import isotopic_variants
 
 # Set global font conditions for figures
 params = {"font.family": "Arial",
@@ -29,23 +32,172 @@ params = {"font.family": "Arial",
 plt.rcParams.update(params)
 
 class FeatureAnnotate:
-	def __init__(self, feature_list, reference_db, spectral_db=None):
+	def __init__(self, feature_list, reference_db, spectral_db=None, spectral_score="reverse"):
 		"""
 		FeatureAnnotate.__init__
 		description:
 			Initializes a new FeatureAnnotate with a spectral feature list to be annotated.
 		parameters:
 			feature_list (str) -- path to the Excel file (.xlsx) containing the feature list.
-			reference_db (str) -- path to the reference database file (.db)
-			spectral_db (str) -- path to the reference spectral database file (.db)
+			reference_db (str) -- path to the reference database file (.db).
+			spectral_db (str) -- path to the reference spectral database file (.db).
+			spectral_score (str) -- type of MS/MS scoring algorithm to utilize.
 		"""
 		self.feature_list = feature_list
 		self.feature_df = None
 		self.reference_db = reference_db 
 		self.spectral_db = spectral_db
+		self.spectral_score = spectral_score
 		self.reference_db_conn = sqlite3.connect(reference_db)
 		self.spectral_db_conn = sqlite3.connect(spectral_db) if spectral_db else None
 		self.read_features()
+
+	def parse_molecular_formula(self, formula_str):
+		"""
+		FeatureAnnotate.parse_molecular_formula
+		description:
+			Converts molecular formula string to a dictionary format.
+		parameters:
+			formula_str (str) -- molecular formula string.
+		returns:
+			(dict) -- parsed molecular formula.
+		"""
+		element_pattern = re.compile(r"([A-Z][a-z]*)(\d*)")
+		elements = element_pattern.findall(formula_str)
+		formula_dict = {element: int(count) if count else 1 for element, count in elements}
+
+		return formula_dict
+
+	def theoretical_isotope_distribution(self, molecular_formula, npeaks=3, charge=1):
+		"""
+		FeatureAnnotate.theoretical_isotope_distribution
+		description:
+			Calculates theoretical isotopic distribution for a given molecular formula using brainpy.
+		paramteres:
+			molecular_formula (str) -- molecular formula used to calculate the theoretical isotopic distribution. 
+			npeaks (int) -- number of peaks to include in the isotopic cluster, starting from the monoisotopic peak, default is 3. 
+			charge (int) -- charge state of the isotopic cluster to produce. 
+		returns:
+			(list of tuples) -- list of theoretical isotopic peaks. 
+		"""
+		# Convert molecular formula to a dictionary
+		if isinstance(molecular_formula, str):
+			molecular_formula = self.parse_molecular_formula(molecular_formula)
+
+		# Calculate theoretical isotopic cluster using brainpy
+		# Default charge_carrier is 0 because all QAC adducts are [M]+
+		theoretical_isotopic_cluster = isotopic_variants(molecular_formula, npeaks=npeaks, charge=charge, charge_carrier=0)
+
+		return [(peak.mz, peak.intensity) for peak in theoretical_isotopic_cluster]
+
+	def find_isotope_peaks(self, file_name, molecular_formula, monoisotopic_mz, rt_start, rt_end, ms1_function, mz_tolerance=0.025):
+		"""
+		FeatureAnnotate.find_isotope_peaks
+		description:
+			Finds isotopic clusters in the MS1 scan.
+		parameters:
+			file_name (str) -- path to the .raw file.
+			molecular_formula (str) -- molecular formula of the potential match. 
+			monoisotpic_mz (float) -- monoisotopic peak of the potential match.
+			rt_start (float) -- retention time of the start of the identified EIC peak.
+			rt_end (float) -- retention time of the end of the identified EIC peak. 
+			ms1_function (int) -- MS1 function number. 
+			mz_tolerance (float) -- m/z tolerance for peak matching, default is 0.025 Da. 
+		returns:
+		 (list) -- observed MS1 isotopic peaks.
+		"""
+		# Calculate and normalize theoretical isotopic distribution
+		theoretical_isotopes = self.theoretical_isotope_distribution(molecular_formula)
+		max_theoretical_intensity = max(intensity for _, intensity in theoretical_isotopes)
+		normalized_theoretical_isotopes = [(mz, intensity / max_theoretical_intensity * 100) for mz, intensity in theoretical_isotopes]
+
+		# Extract the MS1 spectrum 
+		rdr = MassLynxReader(file_name)
+		mz_array, intensity_array = rdr.get_spectrum(ms1_function, rt_start, rt_end)
+
+		# Smooth and fit the extracted MS1 spectrum using Gaussian convolution
+		# This process is analogous to "centroiding" the profile data as outlined in Msnbase
+		identified_peaks, smoothed_intensity = self.gaussian_smooth_pick(mz_array, intensity_array, window_len=1, std=0.1, prominence=0.001)
+
+		# Identify the experimental monoisotpic peak
+		monoisotopic_peak = self.monoisotopic_peak(identified_peaks, normalized_theoretical_isotopes[0][0], mz_tolerance)
+		if not monoisotopic_peak:
+			return []
+
+		# Normalize intensities of experimental peaks to the monoisotopic peak
+		max_experimental_intensity = monoisotopic_peak[1]
+		normalized_experimental_peaks = [(mz, intensity / max_experimental_intensity * 100) for mz, intensity in identified_peaks]
+
+		# Match theoretical isotopes with observed peaks
+		observed_isotopes = []
+		for theoretical_mz, normalized_theoretical_intensity in normalized_theoretical_isotopes:
+			closest_peak = None 
+			min_intensity_diff = float("inf")
+
+			# Find the closest matching experimental peak based on relative intensity
+			for exp_mz, normalized_exp_intensity in normalized_experimental_peaks:
+				if abs(exp_mz - theoretical_mz) <= mz_tolerance:
+					intensity_diff = abs(normalized_exp_intensity - normalized_theoretical_intensity)
+					if intensity_diff < min_intensity_diff:
+						closest_peak = (exp_mz, normalized_exp_intensity * max_experimental_intensity)
+						min_intensity_diff = intensity_diff 
+
+			# Add the closest peak to the observed isotopes list
+			if closest_peak:
+				observed_isotopes.append(closest_peak)
+
+		return observed_isotopes, (mz_array, smoothed_intensity)
+
+	def isotope_similarity_score(self, theoretical_isotopes, experimental_isotopes):
+		"""
+		FeatureAnnotate.isotope_similarity_score
+		description:
+			Calculates similarity score between experimental and theoretical isotopic distributions.
+		parameters:
+			theoretical_isotopes (list of tuples) -- peaks for theoretical isotopes.
+			experimental_isotopes (list of tuples) -- peaks for experimental isotopes. 
+		returns:
+			(float) -- isotope similarity score.
+		"""
+		# Ensure that there are isotopes to compare
+		if not theoretical_isotopes or not experimental_isotopes:
+			return 0
+
+		theoretical_monoisotope_intensity = theoretical_isotopes[0][1]
+		experimental_monoisotope_intensity = experimental_isotopes[0][1]
+		experimental_ratios = []
+
+		# Loop through each theoretical isotope
+		for theo_mz, theo_intensity in theoretical_isotopes:
+
+			# Find matching experimental isotope within the m/z tolerance
+			# Currently set at 0.025 Da
+			match = next((exp_intensity for exp_mz, exp_intensity in experimental_isotopes if abs(exp_mz - theo_mz) < 0.025), None)
+
+			# Calculate the ratio if a match is found, otherwise use 0
+			experimental_ratios.append(match / experimental_monoisotope_intensity if match else 0)
+
+		# Calculate the intensity ratio for theoretical isotopes relative to monoisotopic peak
+		theoretical_ratios = [intensity / theoretical_monoisotope_intensity for _, intensity in theoretical_isotopes]
+
+		# Calculate the isotope similarity score
+		score_diff_sum = sum(abs(exp_ratio - theo_ratio) for exp_ratio, theo_ratio in zip(experimental_ratios, theoretical_ratios))
+		score = 100 * (1 - score_diff_sum / len(theoretical_ratios))
+
+		return score
+
+		"""
+		# Calculate the intensity ratio for theoretical and experimental isotopes relative to monoisotopic peak
+		theoretical_monoisotope_intensity = theoretical_isotopes[0][1]
+		experimental_monoisotope_intensity = experimental_isotopes[0][1]
+		theoretical_ratios = [intensity / theoretical_monoisotope_intensity for _, intensity in theoretical_isotopes]
+		experimental_ratios = [intensity / experimental_monoisotope_intensity for _, intensity in experimental_isotopes]
+
+		# Calculate isotope similarity score
+		score_diff_sum = sum(abs(experimental_ratio - theoretical_ratio) for experimental_ratio, theoretical_ratio in zip(experimental_ratios, theoretical_ratios))
+		score = 100 * (1 - score_diff_sum)
+
+		return score"""
 
 	def peak_fit(self, t, dt_i, p0="guess"):
 		"""
@@ -140,7 +292,7 @@ class FeatureAnnotate:
 
 		return most_intense_peaks
 
-	def gaussian_smooth_pick(self, mz_array, intensity_array, window_len=51, std=7, prominence=0.1):
+	def gaussian_smooth_pick(self, mz_array, intensity_array, window_len=1, std=0.1, prominence=0.001):
 		"""
 		FeatureAnnotate.gaussian_smooth_pick
 		description:
@@ -150,9 +302,9 @@ class FeatureAnnotate:
 		parameters:
 			mz_array (array-like): array of m/z values corresponding to the intensities.
 			intensity_array (array-like): array of intensity values to be smoothed and from which peaks are identified.
-			window_len (int) -- length of the gaussian window used for smoothing. Default is 51.
-			std (float) -- standard deviation of the Gaussian window, controlling the degree of smoothing. Default is 7.
-			prominence (float) -- minimum prominence of peaks to be identified. Default is 0.1
+			window_len (int) -- length of the gaussian window used for smoothing. Default is 1.
+			std (float) -- standard deviation of the Gaussian window, controlling the degree of smoothing. Default is 0.1.
+			prominence (float) -- minimum prominence of peaks to be identified. Default is 0.001
 		returns:
 			(tuple) -- a tuple containing identified peaks and smoothed intensity array.
 		"""
@@ -307,7 +459,7 @@ class FeatureAnnotate:
 			title_mirror (str) -- title of the mirror plot.
 			fname_mirror (str) -- file name for saving the plot.
 		returns:
-			(.png) -- image displaying the extracted and reference fragmentation spectra.
+			(.png) -- image displaying the fragmentation mirror plot and MS1 isotopic distributions.
 		"""
 		if len(processed_mz) == 0 or len(msms_data) == 0:
 			print("One or both m/z arrays are empty.")
@@ -358,6 +510,101 @@ class FeatureAnnotate:
 		plt.savefig(fname_mirror, dpi=350, bbox_inches="tight")
 		plt.close()
 
+	def isotope_plot(self, observed_isotopes, theoretical_isotopes, smoothed_ms1_data, title_isotope, fname_isotope):
+		"""
+		FeatureAnnotate.isotope_plot
+		description:
+			Generate a plot displaying the extracted MS1 isotope cluster and the theoretical isotopes.
+		parameters:
+			observed_isotopes (list) -- observed MS1 isotope cluster.
+			theoretical_isotopes (list) -- theoretical isotopes.
+			smoothed_ms1_data (tuple) -- centroided MS1 spectrum.
+			title_isotope (str) -- title of the isotope plot.
+			fname_isotope (str) -- file name for saving the plot.
+		returns:
+			(.png) -- image displaying the extracted MS1 isotope clsuter and theoretical isotopes. 
+			"""
+			# Unpack smoothed MS1 data 
+		smoothed_mz, smoothed_intensity = smoothed_ms1_data
+
+		# Find m/z value of the monoisotopic peak from observed isotopes
+		monoisotopic_mz = min(observed_isotopes, key=lambda x: x[0])[0]
+
+		mz_tolerance = 0.025
+
+		# Find peaks in smoothed MS1 data that match the monoisotopic peak
+		matching_peaks = [(mz, intensity) for mz, intensity in zip(smoothed_mz, smoothed_intensity) if abs(mz - monoisotopic_mz) <= mz_tolerance]
+
+		# Determine the most intense peak from matching peaks or default to 1 if none are found
+		if matching_peaks:
+			ms1_monoisotopic_intensity = max(matching_peaks, key=lambda x: x[1])[1]
+		else:
+			ms1_monoisotopic_intnesity = 1
+
+		# Normalize raw MS1 intensities to the most intense matching peak
+		normalized_raw_intensity = [(intensity / ms1_monoisotopic_intensity) * 100 for intensity in smoothed_intensity]
+
+		# Normalize theoretical isotope intensities from 0 to 100
+		max_theoretical_intensity = max(intensity for _, intensity in theoretical_isotopes)
+		normalized_theoretical_isotopes = [(mz, (intensity / max_theoretical_intensity) * 100) for mz, intensity in theoretical_isotopes]
+
+		# Normalize observed isotope intensities from 0 to 100
+		max_observed_intensity = max(intensity for _, intensity in observed_isotopes)
+		normalized_observed_isotopes = [(mz, (intensity / max_observed_intensity) * 100) for mz, intensity in observed_isotopes]
+
+		# Determine x axis limits based on the range of observed isotopes
+		min_mz_observed = min(mz for mz, _ in theoretical_isotopes) - 0.5
+		max_mz_observed = max(mz for mz, _ in theoretical_isotopes) + 0.5
+
+		# Create a figure and axis for the plot
+		fig, ax = plt.subplots(figsize=(6.4, 4.8))
+
+		# Plot each theoretical isotope
+		for mz, intensity in normalized_theoretical_isotopes:
+			ax.plot([mz, mz], [0, intensity], "magenta", lw=3.5, label="Theoretical Isotopes" if mz == normalized_theoretical_isotopes[0][0] else "")
+
+		# Plot each observed isotope
+		for mz, intensity in normalized_observed_isotopes:
+			ax.plot([mz, mz], [0, intensity], "black", linestyle="--", lw=1.3, label="Observed Isotopes" if mz == normalized_observed_isotopes[0][0] else "")
+
+		# Plot the raw MS1 data 
+		ax.plot(smoothed_mz, normalized_raw_intensity, "lightgray", lw=1.3, label="Raw MS1 Data")
+
+		# Add annotations for theoretical and observed isotopes
+		for i, (theo_mz, theo_intensity) in enumerate(normalized_theoretical_isotopes):
+
+			# Find the closest observed isotope to the current theoretical isotope
+			observed_mz, observed_intensity = min(observed_isotopes, key=lambda x: abs(x[0] - theo_mz))
+
+			# Add annotations 
+			ax.text(theo_mz, theo_intensity + 5, f"Theoretical: {theo_mz:.4f} ({theo_intensity:.1f})", ha="center", va="bottom", fontsize=8, fontweight="bold", fontname="Arial", color="magenta")
+			norm_observed_intensity = [intensity for obs_mz, intensity in normalized_observed_isotopes if abs(obs_mz - observed_mz) < 0.025][0]
+			ax.text(theo_mz, theo_intensity + 4, f"Observed: {observed_mz:.4f} ({norm_observed_intensity:.1f})", ha="center", va="top", fontsize=8, fontweight="bold", fontname="Arial", color="black")
+
+		# Set plot titles, axes, and labels
+		title_fontprops = {"fontsize": 12, "fontweight": "bold", "fontname": "Arial"}
+		axes_label_fontprops = {"fontsize": 12, "fontweight": "bold", "fontname": "Arial"}
+		tick_label_fontprops = {"weight": "bold", "family": "Arial", "size": 10}
+		ax.set_title(title_isotope, **title_fontprops)
+		ax.set_xlabel("m/z", **axes_label_fontprops)
+		ax.set_ylabel("m/z", **axes_label_fontprops)
+		ax.set_ylabel("Relative Intensity [%]", **axes_label_fontprops)
+		ax.set_ylim(0, 110)
+		ax.set_xlim(min_mz_observed, max_mz_observed)
+		ax.tick_params(axis="both", which="major", labelsize=10, width=1)
+		for label in ax.get_xticklabels() + ax.get_yticklabels():
+			label.set_fontname("Arial")
+			label.set_fontweight("bold")
+			label.set_fontsize(10)
+		ax.legend(loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white")
+		ax.spines["top"].set_visible(False)
+		ax.spines["right"].set_visible(False)
+		ax.spines["left"].set_linewidth(1.5)
+		ax.spines["bottom"].set_linewidth(1.5)
+		plt.tight_layout()
+		plt.savefig(fname_isotope, dpi=300, bbox_inches="tight")
+		plt.close()
+
 	def read_features(self):
 		"""
 		FeatureAnnotate.read_features
@@ -372,7 +619,7 @@ class FeatureAnnotate:
 		description:
 			Extracts the raw AIF spectrum for a given spectral feature.
 		parameters:
-			file_name (str) -- name of the .raw file. 
+			file_name (str) -- path to the .raw file. 
 			mobility_function (int) -- mobility function number.
 			rt_start (float) -- retention time of the start of the identified EIC peak.
 			rt_end (float) -- retention time of the end of the identified EIC peak.
@@ -411,21 +658,23 @@ class FeatureAnnotate:
 		# Return the most intense peak within the tolerance range
 		return max(potential_precursors, key=lambda x: x[1])
 
-	def deconvolute_spectrum(self, file_name, extracted_mz, extracted_intensity, mz, rt_start, rt_end, dt, mobility_function, ms1_function, reference_spectra, dt_tolerance=0.1, group_tolerance=1):
+	def deconvolute_spectrum(self, file_name, extracted_mz, extracted_intensity, mz, rt_start, rt_end, rt, dt, mobility_function, ms1_function, ms2_function, reference_spectra, dt_tolerance=0.1, group_tolerance=1):
 		"""
 		FeatureAnnotate.deconvolute_spectrum
 		description:
 			Deconvolutes the raw, extracted AIF based on rt and dt alignment.
 		parameters:
-			file_name (str) -- name of the .raw file.
+			file_name (str) -- path to the .raw file.
 			extracted_mz (array) -- array of m/z values from the AIF spectrum.
 			extracted_intensity (array) -- array of intensity values from the AIF spectrum.
 			mz (float) -- precursor m/z value of the spectral feature.
 			rt_start (int) -- index corresponding to beginning of EIC peak. 
 			rt_end (int) -- index corresponding to end of EIC peak.
+			rt (int) -- retention time of the spectral feature.
 			dt (float) -- drift time of the spectral feature.
 			mobility_function (int) -- mobility function number.
 			ms1_function (int) -- MS1 function number.
+			ms2_function (int) -- MS2 function number.
 			reference_spectra (array-like) -- reference fragmentation m/z and intensity pairs. 
 			dt_tolerance (float) -- drift time alignment tolerance for spectral deconvolution of fragment and precursor ions. Default is 0.1 ms. 
 			group_tolerance (float) -- tolerance for grouping peaks by m/z in the reference spectrum. Default is 1 Da. 
@@ -442,6 +691,7 @@ class FeatureAnnotate:
 			msms_data = reference_spectra[potential_match]
 			grouped_reference_peaks = self.group_peaks(msms_data, group_tolerance=1)
 			grouped_reference_spectra[potential_match] = grouped_reference_peaks
+			"""print("grouped reference peaks: {}".format(msms_data))"""
 
 		processed_peaks = []
 
@@ -449,24 +699,26 @@ class FeatureAnnotate:
 		# This process is analogous to "centroiding" the profile data as outlined in MSnbase
 		# The default parmaeters for the smoothing and picking (i.e., window_len=1, std=7, prominence=0.01) pick the most intense peak for each ion distribution.
 		# More aggressive smoothing will lead to slightly different m/z peaks being picked.
-		identified_peaks, smoothed_intensity = self.gaussian_smooth_pick(extracted_mz, extracted_intensity, window_len=1, std=7, prominence=0.01)
+		identified_peaks, smoothed_intensity = self.gaussian_smooth_pick(extracted_mz, extracted_intensity, window_len=1, std=0.1, prominence=0.001)
 
 		"""self.plot_aif(extracted_mz, extracted_intensity, smoothed_intensity, identified_peaks)"""
 
 		# Identify the precursor peak in the AIF
 		precursor_peak = self.monoisotopic_peak(identified_peaks, mz)
 		precursor_dt = dt
+		precursor_rt = rt
 		if precursor_peak:
 
 			# Label the precursor peak and ensure it is appended to processed_peaks
 			processed_peaks.append((precursor_peak[0], precursor_peak[1], "precursor"))
-		print("\n\t\tprecursor peak: {} precursor dt: {}".format(precursor_peak[0], precursor_dt))
+		print("\n\t\tprecursor peak: {} precursor dt: {} precursor rt: {}".format(precursor_peak[0], precursor_dt, precursor_rt))
 
 		# Iterate over each grouped reference fragment peak to find the closest peak in the AIF
+		# This block of code sets up the pseudo-MS/MS spectrum for the reverse dot product
 		for _, grouped_ref_peaks in grouped_reference_spectra.items():
 			for ref_mz, _ in grouped_ref_peaks:
 
-				# Skip the reference peak closest to the precursor m/z
+				# Skip the reference peak closest to the precursor m/z within tolerance window
 				if abs(ref_mz - mz) <= 0.025:
 					continue
 
@@ -500,58 +752,112 @@ class FeatureAnnotate:
 						tag = "dt" if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance else "mz"
 						processed_peaks.append((mz_val, intensity_val, tag))
 
-		# Handle remaining AIF peaks
-		# Remove low intensity peaks, default is 5% of precursor peak
-		threshold_intensity = precursor_peak[1] * 0.05
+		# This block of code is utilized for semi-deconvolution-based dot product calculations
+		# Only the top 20 most intense putative fragment peaks are considered 
+		# Filter remaining AIF peaks by excluding those greater than precursor m/z
+		if self.spectral_score == "semi":
+			filtered_peaks_below_precursor = [peak for peak in identified_peaks if peak[0] < precursor_peak[0]]
 
-		# Remove AIF peaks that have already been processed
-		remaining_peaks = [(mz_val, intensity_val) for mz_val, intensity_val in identified_peaks if mz_val <= mz and intensity_val >= threshold_intensity and not any(peak[0] == mz_val for peak in processed_peaks)]
-		print(remaining_peaks)
+			# Take the top 20 most intense remaining AIF peaks
+			top_20_peaks = sorted(filtered_peaks_below_precursor, key=lambda x: x[1], reverse=True)[:20]
 
-		# Iterate over each extracted peak in the remaining AIF peaks
-		grouped_remaining_peaks = {}
-		for mz_val, intensity_val in remaining_peaks:
-			found_group = False
-			for group_mz in grouped_remaining_peaks.keys():
-				if abs(mz_val - group_mz) <= 0.025:
+			# Sort the top 20 most intense peaks in ascending order for processing
+			filtered_peaks = sorted(top_20_peaks, key=lambda x: x[0])
 
-					# Group remaining AIF peaks that are within m/z tolerance (i.e., 0.025 Da)
-					grouped_remaining_peaks[group_mz].append((mz_val, intensity_val))
-					found_group = True 
-					break
-			if not found_group:
-				grouped_remaining_peaks[mz_val] = [(mz_val, intensity_val)]
+			# Iterate over each extracted peak in the filtered AIF peak list
+			for mz_val, intensity_val in filtered_peaks:
 
-		print(grouped_remaining_peaks)
+				# Skip the identified precursor peak
+				if mz_val == precursor_peak[0]:
+					continue
 
-		# Process each group of remaining AIF peaks
-		for group_mz, group_peaks in grouped_remaining_peaks.items():
+				# Attempt to extract precursor retention time-selected EIM
+				fragment_dt, fragment_dt_i = rdr.get_filtered_chrom(mobility_function, mz_val, 0.025, rt_start, rt_end)
 
-			# Choose the most intense peak as the representative peak
-			representative_peak = max(group_peaks, key=lambda x: x[1])
+				# Parameter for smoothing Gaussian curve
+				# Do we need to use a multi-Gaussian function here instead?
+				t_refined = np.arange(min(fragment_dt), max(fragment_dt), float(0.001))
 
-			# Attempt to extract precursor retention time-selected EIM
-			mz_val, intensity_val = representative_peak
-			fragment_dt, fragment_dt_i = rdr.get_filtered_chrom(mobility_function, mz_val, 0.025, rt_start, rt_end)
+				# Initialize and fit Gaussian function
+				A, B, C = self.peak_fit(fragment_dt, fragment_dt_i)
+				fit_i = self.gaussian_fit(t_refined, A, B, C)
 
-			# Parameter for smoothing Gaussian curve
-			t_refined = np.arange(min(fragment_dt), max(fragment_dt), float(0.001))
+				"""
+				# Basic plotting function to visualize fragment EIM
+				plt.figure(figsize=(10,6))
+				plt.plot(fragment_dt, fragment_dt_i, label="Raw Data")
+				plt.plot(t_refined, fit_i, label="Gaussian Fit")
+				plt.xlabel("Drift Time")
+				plt.ylabel("Intensity")
+				plt.legend()
+				plt.savefig(f"Mobilogram_{mz_val}.png")
+				plt.close()
+				"""
 
-			# Initialize and fit Gaussian function
-			A, B, C = self.peak_fit(fragment_dt, fragment_dt_i)
-			fit_i = self.gaussian_fit(t_refined, A, B, C)
+				# Apply FWHM and intensity thresholds
+				if self.fwhm_threshold(C, fragment_dt_i) and precursor_dt is not None:
+					fitted_fragment_dt = float(round(B, 2))
+					print("\n\t\tfragment m/z: {} dt: {}".format(mz_val, fitted_fragment_dt))
 
-			# Apply FWHM and intensity thresholds
-			if self.fwhm_threshold(C, fragment_dt_i) and precursor_dt is not None:
-				fitted_fragment_dt = float(round(B, 2))
-				print("\n\t\tfragment m/z: {} dt: {}".format(mz_val, fitted_fragment_dt))
-				if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance:
+					# Apply tags depending on alignment status with the precursor ion
+					if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance:
+						procesed_peaks.append((mz_val, intensity_val, "dt"))
+		
+		# This block of code is utilized for full deconvolution-based dot product calculations
+		# All putative fragment peaks are considered
+		elif self.spectral_score == "full":
+			filtered_peaks_below_precursor = [peak for peak in identified_peaks if peak[0] < precursor_peak[0]]
 
-					# If representative peak is drift time-aligned, add all peaks in the group to processed_peaks
-					for peak in group_peaks:
-						processed_peaks.append((peak[0], peak[1], "dt"))
-				
-		print("processed peaks: {}".format(processed_peaks))
+			# Iterate over each extracted peak in the AIF peak list
+			for mz_val, intensity_val in filtered_peaks_below_precursor:
+
+				# Skip the identified precursor peak
+				if mz_val == precursor_peak[0]:
+					continue
+
+				# Attempt to extract precursor retention time-selected EIM
+				fragment_dt, fragment_dt_i = rdr.get_filtered_chrom(mobility_function, mz_val, 0.025, rt_start, rt_end)
+
+				# Parameter for smoothing Gaussian curve
+				t_refined = np.arange(min(fragment_dt), max(fragment_dt), float(0.001))
+
+				# Initialize and fit Gaussian function
+				A, B, C = self.peak_fit(fragment_dt, fragment_dt_i)
+				fit_i = self.gaussian_fit(t_refined, A, B, C)
+
+				# Apply FWHM and intensity thresholds
+				if self.fwhm_threshold(C, fragment_dt_i) and precursor_dt is not None:
+					fitted_fragment_dt = float(round(B, 2))
+					print("\n\t\tfragment m/z: {} dt: {}".format(mz_val, fitted_fragment_dt))
+
+					# Apply tags depending on alignment status with precursor ion
+					if abs(fitted_fragment_dt - precursor_dt) <= dt_tolerance:
+						processed_peaks.append((mz_val, intensity_val, "dt"))
+
+		# This block of code utilizes only MS2-level chromatograms for deconvolution
+		# All putative fragment peaks are considered
+		elif self.spectral_score == "ms2":
+			filtered_peaks_below_precursor = [peak for peak in identified_peaks if peak[0] < precursor_peak[0]]
+
+			# Iterate over each extracted peak in the AIF peak list
+			for mz_val, intensity_val in filtered_peaks_below_precursor:
+				print("\n\t\tfragment m/z: {}".format(mz_val))
+
+				# Skip the identified precursor peak
+				if mz_val == precursor_peak[0]:
+					continue
+
+				# Extract the m/z-selected MS2 chromatogram
+				ms2_rt, ms2_intensity = rdr.get_chrom(ms2_function, mz_val, 0.025)
+				ms2_rt = np.array(ms2_rt)
+				ms2_intensity = np.array(ms2_intensity)
+
+				# Identify peaks in m/z selecte MS2 chromatogram
+				ms2_peak_indices, ms2_rt_list, _, _, = process_chromatogram(ms2_rt, ms2_intensity, file_name, mz_val, "sample", "False", prominence=500, distance=2)
+
+				# Check if MS2 retention time matches the precursor retention time
+				if any(abs(precursor_rt - ms2_rt[idx]) <= 0.1 for idx in ms2_peak_indices):
+					processed_peaks.append((mz_val, intensity_val, "dt"))
 
 		return processed_peaks
 
@@ -682,7 +988,7 @@ class FeatureAnnotate:
 		else:
 			return [], []
 
-	def composite_score(self, mz_similarity_score, cosine_similarity_score, ccs_similarity_score):
+	def composite_score(self, mz_similarity_score, cosine_similarity_score, ccs_similarity_score, isotope_score):
 		"""
 		FeatureAnnotate.composite_score
 		description:
@@ -692,12 +998,14 @@ class FeatureAnnotate:
 			mz_similarity_score (float) -- score for similarity between extracted monoisotopic peak and candidate m/z (i.e., the target m/z).
 			cosine_similarity_score (float) -- weighted cosine similarity score that downweights AIF fragment ions relative to dt-aligned fragment ions. 
 			ccs_similarity_score (float) -- score for similarity between spectral feature CCS value and reference CCS value for each candidate.
+			isotope_score (float) -- score for similarity between observed and theoretical isotopic distributions.
 		returns:
 			(float) -- composite score. 
 		"""
-		return mz_similarity_score + cosine_similarity_score + ccs_similarity_score
+		average_score = (mz_similarity_score + cosine_similarity_score + ccs_similarity_score + isotope_score) / 4
+		return average_score
 
-	def match_msms(self, ms1_function, mobility_function, database_type, mz_tolerance, rt_tolerance, ccs_tolerance):
+	def match_msms(self, ms1_function, ms2_function, mobility_function, database_type, mz_tolerance, rt_tolerance, ccs_tolerance):
 		"""
 		FeatureAnnotate.match_msms
 		description:
@@ -735,20 +1043,22 @@ class FeatureAnnotate:
 		for i, row in self.feature_df.iterrows():
 			file_name, mz, rt, ccs, gradient, ccs_calibrant, column_type, monoisotopic_mz, dt = row["File Name"], row["Target m/z"], row["Observed Retention Time (min)"], row["Observed CCS (Å²)"], row["Gradient"], row["CCS Calibrant"], row["Column Type"], row["Observed m/z"], row["Observed Drift Time (ms)"]
 			potential_matches_column = []
+			ranked_matches_column = []
+			similarity_list = []
 
 			# Print the current peak being analyzed to the terminal
 			print("\n\traw file: {} m/z: {} rt: {}".format(file_name, mz, rt))
 
 			# Execute sqlite query based on m/z, rt, and CCS
 			cursor = self.reference_db_conn.cursor()
-			cursor.execute(f"""SELECT DISTINCT compound_name FROM qacs_rt_ccs WHERE exact_mz BETWEEN ? AND ? AND rt BETWEEN ? AND ? AND average_ccs BETWEEN ? AND ? AND gradient = ? AND ccs_calibrant = ? AND column_type = ?""", (mz - mz_tolerance, mz + mz_tolerance, rt - rt_tolerance, rt + rt_tolerance, ccs * (1 - ccs_tolerance), ccs * (1 + ccs_tolerance), gradient, ccs_calibrant, column_type))
+			cursor.execute(f"""SELECT DISTINCT compound_name, molecular_formula FROM qacs_rt_ccs WHERE exact_mz BETWEEN ? AND ? AND rt BETWEEN ? AND ? AND average_ccs BETWEEN ? AND ? AND gradient = ? AND ccs_calibrant = ? AND column_type = ?""", (mz - mz_tolerance, mz + mz_tolerance, rt - rt_tolerance, rt + rt_tolerance, ccs * (1 - ccs_tolerance), ccs * (1 + ccs_tolerance), gradient, ccs_calibrant, column_type))
 
 			# Fetch the results of the query
 			matches = cursor.fetchall()
+			"""print("matches: {}".format(matches))"""
 
 			# Extract potential matches from database query
 			if matches:
-				potential_matches = [match[0] for match in matches]
 				ranked_matches = []
 				reference_spectra = {}
 
@@ -798,8 +1108,14 @@ class FeatureAnnotate:
 					dt_start = max(dt_start, min(t))
 					dt_end = min(dt_end, max(t))
 
-				# Iterate over each potential match 
-				for potential_match in potential_matches:
+				# Initialize dictionary to store molecular formulas for each potential match
+				molecular_formulas = {}
+
+				# Iterate over each potential match to extract reference data 
+				for potential_match, molecular_formula in matches:
+
+					# Store molecular formula in the dictionary
+					molecular_formulas[potential_match] = molecular_formula 
 
 					# Fetch reference data for each potential match
 					ccs_rt_cursor = self.reference_db_conn.cursor()
@@ -821,14 +1137,9 @@ class FeatureAnnotate:
 					# Fetch results of the query
 					msms_data = cursor.fetchall()
 
-					if msms_data:
-
-						# Store the raw reference fragmentation spectrum for each potential match
-						reference_spectra[potential_match] = msms_data
-						"""print("reference spectra: {}".format(reference_spectra))"""
-					else:
-						reference_spectra[potential_match] = []
 					if reference_data:
+
+						"""print("reference spectra: {}".format(potential_match))"""
 						print("\n\t\t**Potential match found. Performing spectral deconvolution and scoring.**")
 
 						# Calculate error between retention time of extracted spectral feature and reference retention time of potential match
@@ -843,71 +1154,102 @@ class FeatureAnnotate:
 					else:
 						ccs_similarity_score = 0
 
-				# Extrac AIF spectrum for the experimental peak with potential matches
-				extracted_mz, extracted_intensity = self.extract_aif(file_name, mobility_function, rt_start, rt_end, dt_start, dt_end)
+					# Redefine reference spectra to only include the current match's spectrum
+					reference_spectra = {potential_match: msms_data if msms_data else []}
 
-				# Deconvolute AIF spectrum
-				processed_peaks = self.deconvolute_spectrum(file_name, extracted_mz, extracted_intensity, mz, rt_start, rt_end, row.get("Observed Drift Time (ms)", None), mobility_function, ms1_function, reference_spectra, dt_tolerance=0.1, group_tolerance=0.5)
+					# Extrac AIF spectrum for the experimental peak with potential matches
+					extracted_mz, extracted_intensity = self.extract_aif(file_name, mobility_function, rt_start, rt_end, dt_start, dt_end)
+					
+					# Deconvolute AIF spectrum
+					processed_peaks = self.deconvolute_spectrum(file_name, extracted_mz, extracted_intensity, mz, rt_start, rt_end, row.get("Observed Retention Time (min)", None), row.get("Observed Drift Time (ms)", None), mobility_function, ms1_function, ms2_function, reference_spectra, dt_tolerance=0.1, group_tolerance=0.5)
 
-				# Normalize deconvoluted AIF spectrum to most intense peak for fair comparison to normalized reference spectra
-				processed_mz, processed_intensity = self.normalize_and_process(processed_peaks)
+					# Normalize deconvoluted AIF spectrum to most intense peak for fair comparison to normalized reference spectra
+					processed_mz, processed_intensity = self.normalize_and_process(processed_peaks)
 
-				# Initialize dictionary to store fragmentation score for each tag
-				fragmentation_score = {"precursor": 0, "dt": 0, "mz": 0}
-				for _, _, tag in processed_peaks:
-					fragmentation_score[tag] += 1
+					# Initialize dictionary to store fragmentation score for each tag
+					fragmentation_score = {"precursor": 0, "dt": 0, "mz": 0}
+					for _, _, tag in processed_peaks:
+						fragmentation_score[tag] += 1
 
-				print("\n\t\tFragmentation Tag Counter: {}".format(fragmentation_score))
+					print("\n\t\tFragmentation Tag Counter: {}".format(fragmentation_score))
 
-				similarity_list = []
+					processed_peaks_tuples = [(mz, intensity, tag) for mz, intensity, tag in processed_peaks]
 
-				processed_peaks_tuples = [(mz, intensity, tag) for mz, intensity, tag in processed_peaks]
+					# Iterate over each potential match to apply scoring algorithms 
+					for potential_match, msms_data in reference_spectra.items():
 
-				# Iterate over each potential match 
-				for potential_match, msms_data in reference_spectra.items():
+						# Construct the vectors for the extracted and reference spectra
+						reference_vector, processed_vector = self.match_mz([mz for mz, _ in msms_data], [intensity for _, intensity in msms_data], processed_peaks_tuples, mz_tolerance)
+						similarity_score = self.cosine_similarity(reference_vector, processed_vector)
 
-					# Construct the vectors for the extracted and reference spectra
-					reference_vector, processed_vector = self.match_mz([mz for mz, _ in msms_data], [intensity for _, intensity in msms_data], processed_peaks_tuples, mz_tolerance)
-					similarity_score = self.cosine_similarity(reference_vector, processed_vector)
+						# Group reference spectra to extract the number of total possible fragments
+						grouped_reference_peaks = self.group_peaks(msms_data, group_tolerance=1)
 
-					# Group reference spectra to extract the number of total possible fragments
-					grouped_reference_peaks = self.group_peaks(msms_data, group_tolerance=1)
+						# Identify the precursor peak in the reference spectrum as the peak closest to the target m/z
+						precursor_peak = self.monoisotopic_peak(grouped_reference_peaks, mz)
 
-					# Identify the precursor peak in the reference spectrum as the peak closest to the target m/z
-					precursor_peak = self.monoisotopic_peak(grouped_reference_peaks, mz)
+						# Count the total possible fragments in the reference spectrum (excluding the precursor peak)
+						if precursor_peak:
+							total_possible_fragments = len([peak for peak in grouped_reference_peaks if peak[0] != precursor_peak[0]])
 
-					# Count the total possible fragments in the reference spectrum (excluding the precursor peak)
-					total_possible_fragments = len([peak for peak in grouped_reference_peaks if peak[0] != precursor_peak[0]])
+						# Count the number of matched fragment peaks (excluding the precursor peak)
+						else:
+							total_possible_fragments = len(grouped_reference_peaks)
+						matched_fragment_count = sum(1 for _, _, tag in processed_peaks_tuples if tag in ["mz", "dt"])
 
-					# Count the number of matched fragment peaks (excluding the precursor peak)
-					matched_fragment_count = sum(1 for _, _, tag in processed_peaks_tuples if tag in ["mz", "dt"])
+						# Calculate m/z similarity score between potential match m/z (i.e, row["Target m/z"]) and monoisotopic m/z peak of extracted feature
+						mz_error = abs(monoisotopic_mz - mz) / mz * 1e6 
+						mz_similarity_score = min(1 / mz_error, 1) * 100 if mz_error != 0 else 100
 
-					# Calculate m/z similarity score between potential match m/z (i.e, row["Target m/z"]) and monoisotopic m/z peak of extracted feature
-					mz_error = abs(monoisotopic_mz - mz) / mz * 1e6 
-					mz_similarity_score = min(1 / mz_error, 1) * 100 if mz_error != 0 else 100
+						# Retrieve molecular formula from the dictionary
+						molecular_formula = molecular_formulas[potential_match]
+						"""print(molecular_formula)"""
 
-					# Calculate composite score
-					composite_score = self.composite_score(mz_similarity_score, similarity_score, ccs_similarity_score)
+						# Calculate theoretical isotopic distribution
+						theoretical_isotopes = self.theoretical_isotope_distribution(molecular_formula)
+						"""print(theoretical_isotopes)"""
 
-					# Store the composite score to show both the raw score and its percentage out of the theoretical maximum score of 300
-					formatted_composite_score = f"{composite_score:.2f} / {(composite_score / 300) * 100:.2f}%"
-					formatted_ranked_match = f"{potential_match} (COMPOSITE: {formatted_composite_score} | COSINE: {similarity_score:.2f} (MATCHED FRAGMENTS: {matched_fragment_count} / {total_possible_fragments}) | MASS ERROR (ppm): {mz_error:.2f} | RETENTION TIME ERROR (%): {rt_delta:.2f} | CCS ERROR (%): {ccs_delta:.2f})"
+						# Find experimental isotopic cluster
+						observed_isotopes, smoothed_ms1_data = self.find_isotope_peaks(file_name, molecular_formula, monoisotopic_mz, rt_start, rt_end, ms1_function)
 
-					similarity_list.append((composite_score, similarity_score, formatted_ranked_match, potential_match))
+						# Calculate isotope score
+						isotope_score = self.isotope_similarity_score(theoretical_isotopes, observed_isotopes)
+
+						# Calculate composite score
+						composite_score = self.composite_score(mz_similarity_score, similarity_score, ccs_similarity_score, isotope_score)
+
+						# Store the composite score
+						formatted_composite_score = f"{composite_score:.2f}"
+						formatted_ranked_match = f"{potential_match} (COMPOSITE: {formatted_composite_score} | COSINE: {similarity_score:.2f} (MATCHED FRAGMENTS: {matched_fragment_count} / {total_possible_fragments}) | ISOTOPE DISTRIBUTION: {isotope_score:.2f} | MASS ERROR (ppm): {mz_error:.2f} | RETENTION TIME ERROR (%): {rt_delta:.2f} | CCS ERROR (%): {ccs_delta:.2f})"
+						similarity_list.append((composite_score, similarity_score, formatted_ranked_match, potential_match))
+
+						# Sort and format the ranked matches for this potential match
+						sorted_similarity_list = sorted(similarity_list, key=lambda x: x[0], reverse=True)
+						ranked_matches_column.extend([t[1] for t in sorted_similarity_list])
 
 					# Create "Fragmentation Spectra" folder if not already present
 					spectra_directory = "Fragmentation Spectra"
 					if not os.path.exists(spectra_directory):
 						os.makedirs(spectra_directory)
 
+					# Create "Isotopic Distributions" folder if not already present
+					isotope_directory = "Isotopic Distributions"
+					if not os.path.exists(isotope_directory):
+						os.makedirs(isotope_directory)
+
 					# Generate mirror plot
-					title_mirror = "Experimental vs. Reference MS/MS Spectra \nPotential Match: {} (Score: {}) ".format(potential_match, "0" if np.isnan(similarity_score) else "{:.2f}".format(similarity_score))
+					title_mirror = "Experimental vs. Reference MS/MS Spectra \nPotential Match: {} (Score: {})".format(potential_match, "0" if np.isnan(similarity_score) else "{:.2f}".format(similarity_score))
 					if database_type == "experimental":
 						fname_mirror = "{}/{}_{}_{}_{:.2f}_Experimental_MSMS.png".format(spectra_directory, file_name, mz, potential_match, rt)
 						self.mirror_plot(list(processed_mz), list(processed_intensity), msms_data, title_mirror, fname_mirror)
 					elif database_type == "theoretical":
 						fname_mirror = "{}/{}_{}_{}_{:.2f}_Theoretical_MSMS.png".format(spectra_directory, file_name, mz, potential_match, rt)
 						self.mirror_plot(list(processed_mz), list(processed_intensity), msms_data, title_mirror, fname_mirror)
+
+					# Generate isotope plot
+					title_isotope = "Isotopic Distributions \nPotential Match: {} (Score: {})".format(potential_match, "0" if np.isnan(isotope_score) else "{:.2f}".format(isotope_score))
+					fname_isotope = "{}/{}_{}_{}.png".format(isotope_directory, file_name, mz, potential_match)
+					self.isotope_plot(observed_isotopes, theoretical_isotopes, smoothed_ms1_data, title_isotope, fname_isotope)
 
 				# Sort and format the potential matches by composite score
 				formatted_ranked_matches = ", ".join([t[2] for t in sorted(similarity_list, key=lambda x: x[0], reverse=True)]) if similarity_list else ""
