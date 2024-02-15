@@ -1,6 +1,7 @@
 """
 	expysomics/process.py
 	Ryan Nguyen
+	2/15/2024
 
 	description:
 		Module designed to handle the extraction and basic processing of raw LC-IM-MS data. 
@@ -21,7 +22,6 @@ from matplotlib import rcParams
 from dhrmasslynxapi.reader import MassLynxReader
 from dhrmasslynxapi.ccs_calibration import CCSCalibrationRawXL
 from multigauss import process_chromatogram
-from filter import filter_data
 
 # Set global font conditions for figures
 params = {"font.size": 8,
@@ -324,7 +324,7 @@ class RawProcessor:
 			# Print the current m/z being queried to the terminal
 			print("\n\traw file: {} m/z: {}".format(file_name, mz))
 
-			# Extract m/z-selected ion chromatogram (EIC) from the .raw file using dhrmasslynxapi
+			# Extract m/z-selected ion chromatogram (EIC) from the .raw file using theoretical m/z value
 			# Requires user-inputted MS1 function number and desired m/z tolerance
 			rdr = MassLynxReader(file_name)
 			rt, rt_i = rdr.get_chrom(self.ms1_function, float(mz), self.mz_tolerance)
@@ -357,6 +357,15 @@ class RawProcessor:
 				# Use peak indices to define the window
 				rt_start = rt[start_idx]
 				rt_end = rt[end_idx]
+
+				# Handle cases where peak indices are determined to be equal due to close spacing of raw data
+				# Default to use a fixed 0.3 min window (i.e., +/- 0.15 min around the apex)
+				if rt_start == rt_end:
+					fixed_bound = 0.15
+
+					# Adjust rt_start and rt_end for these cases
+					rt_start = max(rt[0], rt[start_idx] - fixed_bound)
+					rt_end = min(rt[-1], rt[end_idx] + fixed_bound)
 
 				# Extract MS1 spectrum for isotopologue check
 				mz_spectrum, intensity_spectrum = rdr.get_spectrum(ms1_function, rt_start, rt_end)
