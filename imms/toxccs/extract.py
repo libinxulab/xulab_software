@@ -626,7 +626,7 @@ class RawProcessor:
         return filtered_file
 
     def gaussian_smooth_pick(
-        self, mz_array, intensity_array, window_len=1, std=7, prominence=0.1
+        self, mz_array, intensity_array, window_len=1, std=0.1, prominence=0.001
     ):
         """
         FeatureAnnotate.gaussian_smooth_pick
@@ -638,8 +638,8 @@ class RawProcessor:
                 mz_array (array-like): array of m/z values corresponding to the intensities.
                 intensity_array (array-like): array of intensity values to be smoothed and from which peaks are identified.
                 window_len (int) -- length of the gaussian window used for smoothing. Default is 1.
-                std (float) -- standard deviation of the Gaussian window, controlling the degree of smoothing. Default is 7.
-                prominence (float) -- minimum prominence of peaks to be identified. Default is 0.1
+                std (float) -- standard deviation of the Gaussian window, controlling the degree of smoothing. Default is 0.1.
+                prominence (float) -- minimum prominence of peaks to be identified. Default is 0.001
         returns:
                 (tuple) -- a tuple containing identified peaks and smoothed intensity array.
         """
@@ -705,6 +705,7 @@ class RawProcessor:
 
         # Assume the most intense peak is the monoisotopic peak
         monoisotopic_peak = max(potential_peaks, key=lambda x: x[1])
+        print(monoisotopic_peak)
 
         # Initialize variables to hold the monoisotopic peak and its isotopologue type
         isotopologue_type = 0
@@ -717,13 +718,13 @@ class RawProcessor:
                 (
                     peak
                     for peak in potential_peaks
-                    if abs(peak[0] - isotopologue_mz) <= tolerance
+                    if abs(peak[0] - isotopologue_mz) <= mz_tolerance
                 ),
-                (None, None),
+                None,
             )
 
             # Update the monoisotopic peak if an isotopologue is more intense
-            if isotopologue_peak[1] > monoisotopic_peak[1]:
+            if isotopologue_peak and isotopologue_peak[1] > monoisotopic_peak[1]:
                 monoisotopic_peak = isotopologue_peak
                 isotopologue_type = delta_mz
 
@@ -789,10 +790,31 @@ class RawProcessor:
                 )
             )
 
+            # Identify the monoisotopic peak within the MS1 scan
+            # Average all scans within the acquisition time
+            # Default is 0.2 to 1.15 min
+            rdr = MassLynxReader(file_name)
+            mz_spectrum, intensity_spectrum = rdr.get_spectrum(ms1_function, 0.2, 1.15)
+
+            # Smooth and fit the extracted MS1 spectrum using Gaussian convolution
+            # This process is analogous to "centroiding" the profile data as outlined in MSnbase
+            identified_peaks, smoothed_intensity = self.gaussian_smooth_pick(
+                mz_spectrum, intensity_spectrum
+            )
+
+            # Identify the monoisotopic peak in the MS1 centroided data
+            monoisotopic_mz, _ = self.observed_mz(
+                identified_peaks, mz, self.mz_tolerance
+            )
+
+            print(f"monoisotopic peak: {monoisotopic_mz}")
+
             # Extract m/z-selected ion chromatogram (EIC) from the .raw file using theoretical m/z value
             # Requires user-inputted MS1 function number and desired m/z tolerance
             rdr = MassLynxReader(file_name)
-            rt, rt_i = rdr.get_chrom(self.ms1_function, float(mz), self.mz_tolerance)
+            rt, rt_i = rdr.get_chrom(
+                self.ms1_function, float(monoisotopic_mz), self.mz_tolerance
+            )
 
             # Store extracted rt, rt_i data as arrays for further processing
             rt = np.array(rt)
@@ -852,7 +874,7 @@ class RawProcessor:
                     rt_start = max(rt[0], rt[start_idx] - fixed_bound)
                     rt_end = min(rt[-1], rt[end_idx] + fixed_bound)
 
-                # Extract MS1 spectrum for isotopologue check
+                """# Extract MS1 spectrum for isotopologue check
                 mz_spectrum, intensity_spectrum = rdr.get_spectrum(
                     ms1_function, rt_start, rt_end
                 )
@@ -866,12 +888,12 @@ class RawProcessor:
                 )
 
                 # Identify the monoisotopic peak in the MS1 centroided data
-                monoisotopic_mz = self.monoisotopic_peak(identified_peaks, float(mz))
+                monoisotopic_mz = self.monoisotopic_peak(identified_peaks, float(mz))"""
 
                 # Extract (m/z,rt)-selected ion mobilogram (EIM) for each identified LC peak
                 t, dt_i = rdr.get_filtered_chrom(
                     self.mobility_function,
-                    float(mz),
+                    float(monoisotopic_mz),
                     self.mz_tolerance,
                     rt_min=rt_start,
                     rt_max=rt_end,
@@ -891,7 +913,7 @@ class RawProcessor:
                 # Convert extracted drift times to calibrated CCS values using CCSCalibrationRawXL module
                 ccs = None
                 if dt is not None:
-                    ccs = self.cal_data.calibrated_ccs(mz, dt)
+                    ccs = self.cal_data.calibrated_ccs(monoisotopic_mz, dt)
                     ccs = round(ccs, 2)
 
                     # Check if sample is an internal standard
