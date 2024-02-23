@@ -8,9 +8,7 @@
 """
 
 # Todo
-# Test monoisotopic peak algorithm
-# Modify extract logic so that observed m/z is used to extract rt
-# Add MS1 level scan to combined figure
+# Add chemical structure to combined figure
 
 import pandas as pd
 import numpy as np
@@ -316,15 +314,18 @@ class RawProcessor:
         adduct,
         mz,
         monoisotopic_mz,
+        monoisotopic_intensity,
         rt_value,
         fwhm,
         mu_values,
         fname_combined,
+        mz_spectrum,
+        intensity_spectrum,
     ):
         """
         RawProcessor.combined_figure
         description:
-                Generates a figure containing the extracted chromatogram and extracted mobilogram.
+                Generates a figure containing the extracted chromatogram, mobilogram, and MS1 scan with the identified monoisotopic peak displayed.
         parameters:
                 rt (list or numpy.ndarray) -- array of retention times.
                 rt_i (list or numpy.ndarray) -- corresponding intensity values for each retention time.
@@ -343,6 +344,7 @@ class RawProcessor:
                 fwhm (float) -- FWHM of the EIM.
                 mu_values -- (ndarray) -- mu values for multi-Gaussian function.
                 fname_combined (str) -- file name for saving the plot.
+                smoothed_ms1_data (list or numpy.ndarray) -- smoothed MS1 data.
         """
         window_len = 51
         window = gaussian(window_len, std=1)
@@ -363,28 +365,29 @@ class RawProcessor:
         )
 
         # Set up plot
-        fig, (ax1, ax2) = plt.subplots(nrows=2, ncols=1, figsize=(6.4, 6.4))
+        fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, figsize=(6.4, 9.6))
 
         # Plot LC chromatogram figure for successfully fitted EICs
-        ax1.plot(rt, rt_i, "b-", lw=1.5, label="Raw Data")
-        ax1.plot(rt, smoothed_rt_i, "g--", lw=1.5, label="Smoothed Data")
+        ax2.plot(rt, rt_i, "b-", lw=1.5, label="Raw Data")
+        ax2.plot(rt, smoothed_rt_i, "g--", lw=1.5, label="Smoothed Data")
 
         # Condition to plot if peaks were successfully fitted
         if len(peak_indices) > 0:
-            ax1.plot(
+            ax2.plot(
                 rt,
                 self.multi_gaussian_fixed_mu(rt, mu_values, *popt_multi_gaussian),
                 "r-",
                 lw=1.5,
                 label="Gaussian Fit",
             )
+            ax2.set_xlim(0, 1.3)
 
         # Condition to plot if no peaks were detected or fitting fails
         if len(peak_indices) == 0 or popt_multi_gaussian == []:
-            max_rt = rt[np.argmax(rt_i)]
-            ax1.set_xlim(0, max_rt + 1)
+            ax2.set_xlim(0, 1.3)
         else:
-            ax1.set_xlim(rt[peak_indices[0]] - 1, rt[peak_indices[-1]] + 1)
+            """ax2.set_xlim(rt[peak_indices[0]] - 1, rt[peak_indices[-1]] + 1)"""
+            ax2.set_xlim(0, 1.3)
         y_values = self.multi_gaussian_fixed_mu(
             rt[peak_indices], mu_values, *popt_multi_gaussian
         )
@@ -392,15 +395,15 @@ class RawProcessor:
         # Add LC chromatogram peak annotations
         for j in peak_indices:
             label = str(rt[j])
-            ax1.annotate(
+            ax2.annotate(
                 label[:4],
                 xy=(rt[j], rt_i[j]),
-                xytext=(rt[j] + 0.04, rt_i[j] * 0.95),
+                xytext=(rt[j] - 0.09, rt_i[j] * 0.95),
                 fontsize=10,
                 fontweight="bold",
                 fontname="Arial",
             )
-        ax1.scatter(
+        ax2.scatter(
             rt[peak_indices],
             y_values,
             color="purple",
@@ -410,79 +413,27 @@ class RawProcessor:
         )
 
         # Format LC chromatogram
-        ax1.set_xlabel(
+        ax2.set_xlabel(
             "Retention Time [min]",
             fontsize=10,
             fontweight="bold",
             fontname="Arial",
         )
-        ax1.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
-        ax1.set_title(
-            f"{compound_name} \nm/z: {mz:.4f} {adduct}\nExtracted Chromatogram",
+        ax2.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
+        ax2.set_title(
+            "Extracted Chromatogram",
             fontsize=12,
             fontweight="bold",
             fontname="Arial",
         )
-        ax1.tick_params(axis="both", which="major", labelsize=10, width=1)
-        for label in ax1.get_xticklabels():
+        ax2.tick_params(axis="both", which="major", labelsize=10, width=1)
+        for label in ax2.get_xticklabels():
             label.set_fontname("Arial")
             label.set_fontweight("bold")
             label.set_fontsize(10)
-        ax1.spines["top"].set_visible(False)
-        ax1.spines["right"].set_visible(False)
-        ax1.spines["right"].set_linewidth(1.5)
-        ax1.spines["bottom"].set_linewidth(1.5)
-        legend1 = ax1.legend(
-            loc="best",
-            frameon=True,
-            fontsize=10,
-            edgecolor="black",
-            facecolor="white",
-        )
-        for text in legend1.get_texts():
-            text.set_fontname("Arial")
-        max_intensity_y_limit = max(rt_i) + 0.1 * max(rt_i)
-        y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)
-        ax1.set_yticks(y_tick_values)
-        tick_label_fontprops = {"weight": "bold", "family": "Arial", "size": 10}
-        ax1.set_yticklabels(
-            [int(y) for y in y_tick_values], fontdict=tick_label_fontprops
-        )
-        ax1.set_ylim(0, max_intensity_y_limit)
-
-        # Plot mobilogram
-        ax2.text(
-            B + 0.1,
-            0.95 * max(fit_i),
-            "{:.2f}".format(B),
-            c="k",
-            fontsize=10,
-            fontweight="bold",
-            fontname="Arial",
-        )
-        ax2.plot(t, dt_i, "o--b", lw=1.5, ms=2, label="Raw Data")
-        ax2.plot(t_refined, fit_i, "r-", lw=1.5, label="Gaussian Fit")
-        # Need to edit this still!
-        ax2.set_title(
-            f"Extracted Mobilogram\nObserved m/z: {monoisotopic_mz:.4f} \u00B1 0.025 rt: {rt_value} → FWHM ~ {fwhm:.2f} ",
-            fontsize=12,
-            fontweight="bold",
-            fontname="Arial",
-        )
-        ax2.set_xlabel(
-            "Drift Time [ms]",
-            fontsize=10,
-            fontweight="bold",
-            fontname="Arial",
-        )
-        ax2.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
-        max_dt_i_y_limit = max(dt_i) + 0.1 * max(dt_i)
-        ax2.set_ylim(0, max_dt_i_y_limit)
-        ax2.set_xlim(0, B + 2)
-        ax2.tick_params(axis="both", which="major", labelsize=10, width=1)
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
-        ax2.spines["left"].set_linewidth(1.5)
+        ax2.spines["right"].set_linewidth(1.5)
         ax2.spines["bottom"].set_linewidth(1.5)
         legend2 = ax2.legend(
             loc="best",
@@ -492,6 +443,108 @@ class RawProcessor:
             facecolor="white",
         )
         for text in legend2.get_texts():
+            text.set_fontname("Arial")
+        max_intensity_y_limit = max(rt_i) + 0.1 * max(rt_i)
+        y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)
+        ax2.set_yticks(y_tick_values)
+        tick_label_fontprops = {"weight": "bold", "family": "Arial", "size": 10}
+        ax2.set_yticklabels(
+            [int(y) for y in y_tick_values], fontdict=tick_label_fontprops
+        )
+        ax2.set_ylim(0, max_intensity_y_limit)
+
+        # Plot mobilogram
+        ax3.text(
+            B - 0.55,
+            0.95 * max(fit_i),
+            "{:.2f}".format(B),
+            c="k",
+            fontsize=10,
+            fontweight="bold",
+            fontname="Arial",
+        )
+        ax3.plot(t, dt_i, "o--b", lw=1.5, ms=2, label="Raw Data")
+        ax3.plot(t_refined, fit_i, "r-", lw=1.5, label="Gaussian Fit")
+        ax3.set_title(
+            f"Extracted Mobilogram\nObserved m/z: {monoisotopic_mz:.4f} \u00B1 0.025 rt: {rt_value} → FWHM ~ {fwhm:.2f} ",
+            fontsize=12,
+            fontweight="bold",
+            fontname="Arial",
+        )
+        ax3.set_xlabel(
+            "Drift Time [ms]",
+            fontsize=10,
+            fontweight="bold",
+            fontname="Arial",
+        )
+        ax3.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
+        max_dt_i_y_limit = max(dt_i) + 0.1 * max(dt_i)
+        ax3.set_ylim(0, max_dt_i_y_limit)
+        ax3.set_xlim(0, B + 2)
+        ax3.tick_params(axis="both", which="major", labelsize=10, width=1)
+        ax3.spines["top"].set_visible(False)
+        ax3.spines["right"].set_visible(False)
+        ax3.spines["left"].set_linewidth(1.5)
+        ax2.spines["bottom"].set_linewidth(1.5)
+        legend3 = ax3.legend(
+            loc="best",
+            frameon=True,
+            fontsize=10,
+            edgecolor="black",
+            facecolor="white",
+        )
+        for text in legend3.get_texts():
+            text.set_fontname("Arial")
+
+        # Plot MS1 scan
+        ax1.plot(
+            mz_spectrum,
+            intensity_spectrum,
+            lw=1.5,
+            color="black",
+            ms=2,
+            label="Raw MS1 Data",
+        )
+
+        # Add annotations for monoisotopic peak
+        max_y = monoisotopic_intensity * (1.1)
+        ax1.text(
+            monoisotopic_mz - 0.01,
+            max_y * 0.98,
+            f"{monoisotopic_mz:.4f}",
+            fontsize=10,
+            fontweight="bold",
+            fontname="Arial",
+            ha="right",
+            va="top",
+        )
+        ax1.axvline(
+            x=monoisotopic_mz, color="magenta", label="Monoisotopic Peak", lw=2.5
+        )
+        mz_min = monoisotopic_mz - 1
+        mz_max = monoisotopic_mz + 1
+        ax1.set_xlim(mz_min, mz_max)
+        ax1.set_xlabel("m/z", fontsize=10, fontweight="bold", fontname="Arial")
+        ax1.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
+        ax1.set_title(
+            f"{compound_name}\n{mz:.4f} {adduct}\nMS1 Spectrum",
+            fontsize=12,
+            fontweight="bold",
+            fontname="Arial",
+        )
+        ax1.tick_params(axis="both", which="major", labelsize=10, width=1)
+        y_ticks = np.linspace(0, max_y, num=10, endpoint=True)
+        ax1.set_yticks(y_ticks)
+        ax1.set_yticklabels([int(y) for y in y_ticks], fontdict=tick_label_fontprops)
+        ax1.set_ylim(0, max_y)
+        ax1.spines["top"].set_visible(False)
+        ax1.spines["right"].set_visible(False)
+        ax1.spines["left"].set_linewidth(1.5)
+        ax1.spines["bottom"].set_linewidth(1.5)
+        legend1 = ax1.legend(
+            loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
+        )
+        for text in legend1.get_texts():
             text.set_fontname("Arial")
         plt.tight_layout()
         plt.savefig(fname_combined, dpi=300, bbox_inches="tight")
@@ -689,7 +742,7 @@ class RawProcessor:
                 target_mz (float) -- target precursor m/z value.
                 mz_tolerance (float) -- tolerance around the target m/z value for identifying potential peaks.
         returns:
-                (float) -- extracted m/z value of the monoisotopic peak.
+                (tuple) -- extracted (m/z, intensity) values of the monoisotopic peak.
         """
 
         # Filter peaks within the m/z tolerance range
@@ -728,7 +781,7 @@ class RawProcessor:
                 monoisotopic_peak = isotopologue_peak
                 isotopologue_type = delta_mz
 
-        return monoisotopic_peak[0], isotopologue_type
+        return monoisotopic_peak, isotopologue_type
 
     def extract(self, calibration_file, ms1_function, mobility_function, mz_tolerance):
         """
@@ -803,11 +856,9 @@ class RawProcessor:
             )
 
             # Identify the monoisotopic peak in the MS1 centroided data
-            monoisotopic_mz, _ = self.observed_mz(
+            (monoisotopic_mz, monoisotopic_intensity), _ = self.observed_mz(
                 identified_peaks, mz, self.mz_tolerance
             )
-
-            print(f"monoisotopic peak: {monoisotopic_mz}")
 
             # Extract m/z-selected ion chromatogram (EIC) from the .raw file using theoretical m/z value
             # Requires user-inputted MS1 function number and desired m/z tolerance
@@ -1001,10 +1052,13 @@ class RawProcessor:
                     adduct,
                     mz,
                     monoisotopic_mz,
+                    monoisotopic_intensity,
                     rt_value,
                     fwhm,
                     mu_values,
                     fname_combined,
+                    mz_spectrum,
+                    intensity_spectrum,
                 )
 
         # Export DataFrame containing extracted spectral features to Excel file (.xlsx)
