@@ -8,7 +8,8 @@
 """
 
 # Todo
-# Add chemical structure to combined figure
+# Adjust dt labels around peak in combined figure
+# Adjust MS1 scan in combined figure to be normalized to most intense peak within displayed x range
 
 import pandas as pd
 import numpy as np
@@ -242,62 +243,6 @@ class RawProcessor:
             fwhm_thresholds[0] < fwhm < fwhm_thresholds[1]
             and max_intensity > intensity_threshold
         )
-
-    def atd(self, t, t_refined, dt_i, fit_i, A, B, title_atd, fname_atd):
-        """
-        RawProcessor.atd
-        description:
-                Generates a plot of the raw EIM and the Gaussian fit.
-        parameters:
-                t (list or numpy.ndarray) -- raw EIM time points.
-                t_refined (list or numpy.ndarray) -- refined data points for plotting the fit.
-                dt_i (list or numpy.ndarray) -- original intensity values.
-                fit_i (list or numpy.ndarray) -- intensity values of the fitted curve.
-                A, B (floats) -- Gaussian parameters.
-                title_atd (str) -- title for the plot.
-                fname_atd (str) -- file name for saving the plot.
-        """
-        fig, ax = plt.subplots(figsize=(8, 8))
-        ax.plot(t, dt_i, "o--b", lw=1.5, ms=2, label="Raw Data")  # Plot raw EIM
-        ax.plot(
-            t_refined, fit_i, "r-", lw=1.5, label="Gaussian Fit"
-        )  # Plot fitted data
-        legend = ax.legend(
-            loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
-        )
-        for text in legend.get_texts():
-            text.set_fontname("Arial")
-        ax.text(
-            B + 0.1,
-            0.95 * max(fit_i),
-            "{:.2f}".format(B),
-            c="k",
-            fontsize=10,
-            fontweight="bold",
-            fontname="Arial",
-        )  # Annotate peak of fitted data with dt
-        ax.set_title(title_atd, fontsize=12, fontweight="bold", fontname="Arial")
-        ax.set_xlabel(
-            "Drift Time [ms]", fontsize=12, fontweight="bold", fontname="Arial"
-        )
-        ax.set_ylabel("Intensity", fontsize=12, fontweight="bold", fontname="Arial")
-        max_dt_i_y_limit = max(dt_i) + 0.1 * max(dt_i)
-        plt.ylim(0, max_dt_i_y_limit)  # Set y axis range
-        plt.xlim(0, B + 2)  # Set x axis range
-        tick_label_fontprops = {"weight": "bold", "family": "Arial", "fontsize": 10}
-        ax.tick_params(axis="both", which="major", labelsize=10, width=1)
-        ax.set_xticks(ax.get_xticks())
-        ax.set_yticks(ax.get_yticks())
-        ax.set_xticklabels(ax.get_xticks(), fontdict=tick_label_fontprops)
-        y_ticks = ax.get_yticks()
-        ax.set_yticklabels([int(y) for y in y_ticks], fontdict=tick_label_fontprops)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        ax.spines["left"].set_linewidth(1.5)
-        ax.spines["bottom"].set_linewidth(1.5)
-        plt.tight_layout()
-        plt.savefig(fname_atd, dpi=350, bbox_inches="tight")
-        plt.close
 
     def combined_figure(
         self,
@@ -566,8 +511,8 @@ class RawProcessor:
                 "Adduct",
                 "Target m/z",
                 "Observed m/z",
-                "Column Type",
-                "Sample Type" "CCS Calibrant",
+                "Sample Type",
+                "CCS Calibrant",
                 "Gradient",
                 "Column Type",
                 "Observed Drift Time (ms)",
@@ -600,83 +545,6 @@ class RawProcessor:
                 "Reference Retention Time (min)": row["Reference Retention Time (min)"],
                 "Reference CCS (Å²)": row["Reference CCS (Å²)"],
             }
-
-    def filter_data(self):
-        """
-        RawProcessor.filter_data
-        description:
-                Filters the extracted data to identify unique spectral features based on LC peak intensity.
-        returns:
-        (str) -- The path to the filtered output Excel file (.xlsx).
-        """
-        # Read the input Excel file containing extracted data, i.e., the output of RawProcess.extract
-        df = pd.read_excel(self.output_file)
-
-        # Convert retention time values to floats and strip out any flags
-        df["Observed Retention Time (min)"] = df["Observed Retention Time (min)"].apply(
-            lambda x: float(x.split()[0]) if isinstance(x, str) else x
-        )
-
-        # Select rows where the sample type is "sample"
-        sample_rows = df[df["Sample Type"] == "sample"]
-
-        # Initialize empty list to store rows that meet the filtering criteria
-        unique_features = []
-
-        # Select rows where the same type is "control" for comparison
-        control_rows = df[df["Sample Type"] == "control"]
-
-        # Iterate over each "sample" row to determine if it meets the filtering criteria
-        for index, sample_row in sample_rows.iterrows():
-            sample_mz = sample_row["Target m/z"]
-            sample_rt = sample_row["Observed Retention Time (min)"]
-            sample_peak_area = sample_row["EIC Peak Area"]
-
-            # Start with an empty DataFrame for matching control features
-            matching_controls = pd.DataFrame()
-
-            # Check if there are any control features with the same m/z
-            matching_mz_controls = control_rows[control_rows["Target m/z"] == sample_mz]
-
-            # If there are matching m/z control features, further filter them by retention time
-            if not matching_mz_controls.empty:
-                matching_controls = matching_mz_controls[
-                    abs(
-                        matching_mz_controls["Observed Retention Time (min)"]
-                        - sample_rt
-                    )
-                    <= 0.1
-                ]
-
-            # Handle case where there are no control features that match by m/z and retention time, or if the sample peak area is greater than the max control feature peak
-            if matching_controls.empty or (
-                sample_peak_area > 1.5 * matching_controls["EIC Peak Area"].max()
-            ):
-
-                # Assign a peak area ratio if matching control features are found
-                if not matching_controls.empty:
-                    sample_row["Control EIC Peak Area Ratio"] = (
-                        sample_peak_area / matching_controls["EIC Peak Area"].max()
-                    )
-                else:
-
-                    # Handle case where there are no matching control features
-                    sample_row["Control EIC Peak Area Ratio"] = ""
-
-                # Add the sample row to the list of unique features
-                unique_features.append(sample_row)
-
-        # Create a pandas DataFrame with the unique features
-        df_output = pd.DataFrame(unique_features)
-
-        # Define the output file name
-        filtered_file = self.output_file.replace("_processed.xlsx", "_filtered.xlsx")
-
-        # Export the DataFrame to an Excel file
-        df_output.to_excel(filtered_file, index=False)
-        print("\nFiltering successful. View results in {}\n".format(filtered_file))
-
-        return filtered_file
 
     def gaussian_smooth_pick(
         self, mz_array, intensity_array, window_len=1, std=0.1, prominence=0.001
@@ -758,7 +626,6 @@ class RawProcessor:
 
         # Assume the most intense peak is the monoisotopic peak
         monoisotopic_peak = max(potential_peaks, key=lambda x: x[1])
-        print(monoisotopic_peak)
 
         # Initialize variables to hold the monoisotopic peak and its isotopologue type
         isotopologue_type = 0
@@ -805,18 +672,10 @@ class RawProcessor:
         df_input = pd.read_excel(self.target_list)
         df_input.reset_index(drop=True, inplace=True)
 
-        # Generate a new folder called "Extracted Mobilograms" in the directory if not already present
-        """mobilogram_directory = "Extracted Mobilograms"
-        if not os.path.exists(mobilogram_directory):
-            os.makedirs(mobilogram_directory)"""
-
         # Generate a new folder called "Extracted Data" in the directory if not already present
         data_directory = "Extracted Data"
         if not os.path.exists(data_directory):
             os.makedirs(data_directory)
-
-        # Initialize dictionary for internal standard CCS flags
-        ccs_flags = {}
 
         # Iterate over each row in the target list DataFrame
         print(
@@ -894,23 +753,6 @@ class RawProcessor:
             for rt_value, peak_area, (start_idx, end_idx) in zip(
                 rt_list, areas, peak_ranges
             ):
-                if sample_type == "IS":
-
-                    # Create a key for looking up the reference retention time based on m/z and gradient type
-                    ref_rt_key = (mz, gradient)
-
-                    # If the key is in the reference dictionary, check against the reference retention time
-                    if ref_rt_key in self.reference_is_dict:
-                        reference_rt = self.reference_is_dict[ref_rt_key][
-                            "Reference Retention Time (min)"
-                        ]
-
-                        # Calculate the difference between observed and reference retention times
-                        rt_difference = abs(float(rt_value) - reference_rt)
-
-                        # Flag the retention time if difference is greater than 0.2 min
-                        if rt_difference > 0.2:
-                            rt_value = f"{rt_value} FLAG"
 
                 # Use peak indices to define the window
                 rt_start = rt[start_idx]
@@ -924,22 +766,6 @@ class RawProcessor:
                     # Adjust rt_start and rt_end for these cases
                     rt_start = max(rt[0], rt[start_idx] - fixed_bound)
                     rt_end = min(rt[-1], rt[end_idx] + fixed_bound)
-
-                """# Extract MS1 spectrum for isotopologue check
-                mz_spectrum, intensity_spectrum = rdr.get_spectrum(
-                    ms1_function, rt_start, rt_end
-                )
-
-                # Smooth and fit the extracted MS1 spectrum using Gaussian convolution
-                # This process is analogous to "centroiding" the profile data as outlined in MSnbase
-                # The default parmaeters for the smoothing and picking (i.e., window_len=1, std=7, prominence=0.01) select the most intense peak for each ion distribution
-                # More aggressive smoothing will lead to slightly different m/z peaks being picked
-                identified_peaks, smoothed_intensity = self.gaussian_smooth_pick(
-                    mz_spectrum, intensity_spectrum
-                )
-
-                # Identify the monoisotopic peak in the MS1 centroided data
-                monoisotopic_mz = self.monoisotopic_peak(identified_peaks, float(mz))"""
 
                 # Extract (m/z,rt)-selected ion mobilogram (EIM) for each identified LC peak
                 t, dt_i = rdr.get_filtered_chrom(
@@ -966,25 +792,6 @@ class RawProcessor:
                 if dt is not None:
                     ccs = self.cal_data.calibrated_ccs(monoisotopic_mz, dt)
                     ccs = round(ccs, 2)
-
-                    # Check if sample is an internal standard
-                    if sample_type == "IS":
-
-                        # Create a key for looking up the reference CCS based on m/z (and gradient)
-                        ref_ccs_key = (mz, gradient)
-
-                        # If the key is in the reference dictionary, check against the reference CCS value
-                        if ref_ccs_key in self.reference_is_dict:
-                            reference_ccs = self.reference_is_dict[ref_ccs_key][
-                                "Reference CCS (Å²)"
-                            ]
-
-                            # Calculate the percentage difference between observed and reference CCS
-                            ccs_difference = abs(ccs - reference_ccs) / reference_ccs
-
-                            # Flag the CCS if the difference is greater than 3%
-                            if ccs_difference > 0.03:
-                                ccs_flags[ccs] = "FLAG"
                 else:
                     ccs = None
 
@@ -992,8 +799,6 @@ class RawProcessor:
                 peak_height = max(rt_i[start_idx : end_idx + 1])
 
                 # Append the extracted data to output_rows list
-                flag_status = ccs_flags.get(ccs, "")
-                ccs_output = "" if ccs is None else f"{ccs} {flag_status}".strip()
                 self.output_rows.append(
                     [
                         file_name,
@@ -1006,31 +811,15 @@ class RawProcessor:
                         row["Gradient"],
                         row["Column Type"],
                         dt,
-                        ccs_output,
+                        ccs,
                         rt_value,
                         peak_height,
                         peak_area,
                     ]
                 )
 
-                # Generate title for ATD figure
+                # Calculate FWHM for figure
                 fwhm = C * 2.355
-                title_atd = f"m/z: {mz:.4f} \u00B1 {mz_tolerance} rt: {rt_value} → FWHM ~ {fwhm:.2f}"
-
-                # Generate file name for EIM figure without the directory path
-                fname_suffix = "IS_EIM" if sample_type == "IS" else "EIM"
-                fname = "{}_{}_{}_{}.png".format(file_name, mz, rt_value, fname_suffix)
-
-                # Replace spaces with underscores in the filename only
-                fname = fname.replace(" ", "_")
-
-                # Prepend the directory path to the filename
-                """fname_atd = os.path.join(mobilogram_directory, fname)
-
-                # Generate EIM figure
-                self.atd(
-                    t, t_refined, dt_i, fit_i, A, B, title_atd, fname_atd
-                )"""  # Comment out this code if figures are not needed
 
                 # Generate file name for combined figure
                 fname_combined = (
@@ -1063,6 +852,3 @@ class RawProcessor:
 
         # Export DataFrame containing extracted spectral features to Excel file (.xlsx)
         self.output_file = self.export_to_excel()
-
-        # Export DataFrame containing filtered spectral features to Excel file (.xlsx)
-        """self.filter_data()"""
