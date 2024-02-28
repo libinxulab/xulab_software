@@ -7,10 +7,6 @@
     Module designed to handle the extraction and basic processing of full-scan LC-IM-MS/MS data. Provides a comprehensive set of tools for extracting raw data from .raw files, detecting peaks in the time and m/z dimensions, and converting drift times to calibrated collision cross-section (CCS) values. 
 """
 
-# Todo
-# Adjust dt labels around peak in combined figure
-# Adjust MS1 scan in combined figure to be normalized to most intense peak within displayed x range
-
 import pandas as pd
 import numpy as np
 from scipy.optimize import curve_fit
@@ -18,8 +14,13 @@ from scipy.signal import find_peaks, gaussian, convolve
 import os
 from matplotlib import pyplot as plt
 from matplotlib import rcParams
+import warnings
 from dhrmasslynxapi.reader import MassLynxReader
 from dhrmasslynxapi.ccs_calibration import CCSCalibrationRawXL
+from rdkit import Chem
+from rdkit.Chem import Draw
+import io
+from PIL import Image
 
 # Set global font conditions for figures
 params = {"font.size": 8, "font.family": "Arial", "font.weight": "bold"}
@@ -42,6 +43,22 @@ class RawProcessor:
         if reference_is_file:
             self.read_reference_is(reference_is_file)
         self.output_rows = []
+
+    def smiles_to_structure(self, smiles, img_size=(100, 100)):
+        """
+        RawProcessor.smiles_to_structure
+        description:
+                Converts a SMILES string to a chemical structure.
+        parameters:
+                smiles (str) -- SMILES string.
+                img_size (tuple) -- image size. Default is (100, 100).
+        """
+        mol = Chem.MolFromSmiles(smiles)
+        if mol:
+            img = Draw.MolToImage(mol, size=img_size)
+            return img
+        else:
+            return None
 
     def multi_gaussian_fixed_mu(self, x, mu_values, *params):
         """
@@ -266,6 +283,7 @@ class RawProcessor:
         fname_combined,
         mz_spectrum,
         intensity_spectrum,
+        smiles,
     ):
         """
         RawProcessor.combined_figure
@@ -290,6 +308,7 @@ class RawProcessor:
                 mu_values -- (ndarray) -- mu values for multi-Gaussian function.
                 fname_combined (str) -- file name for saving the plot.
                 smoothed_ms1_data (list or numpy.ndarray) -- smoothed MS1 data.
+                smiles (str) -- SMILES string of the chemical being processed.
         """
         window_len = 51
         window = gaussian(window_len, std=1)
@@ -340,13 +359,15 @@ class RawProcessor:
         # Add LC chromatogram peak annotations
         for j in peak_indices:
             label = str(rt[j])
+            label_y_pos = max(rt_i) + 1500
             ax2.annotate(
                 label[:4],
-                xy=(rt[j], rt_i[j]),
-                xytext=(rt[j] - 0.09, rt_i[j] * 0.95),
+                xy=(rt[j], label_y_pos),
                 fontsize=10,
                 fontweight="bold",
                 fontname="Arial",
+                ha="center",
+                va="bottom",
             )
         ax2.scatter(
             rt[peak_indices],
@@ -399,14 +420,20 @@ class RawProcessor:
         ax2.set_ylim(0, max_intensity_y_limit)
 
         # Plot mobilogram
+        peak_height = max(fit_i)
+        peak_index = np.argmax(fit_i)
+        peak_x_position = t_refined[peak_index]
+        offset = peak_height * 0.001
         ax3.text(
-            B - 0.55,
-            0.95 * max(fit_i),
+            peak_x_position,
+            peak_height + offset,
             "{:.2f}".format(B),
             c="k",
             fontsize=10,
             fontweight="bold",
             fontname="Arial",
+            ha="center",
+            va="bottom",
         )
         ax3.plot(t, dt_i, "o--b", lw=1.5, ms=2, label="Raw Data")
         ax3.plot(t_refined, fit_i, "r-", lw=1.5, label="Gaussian Fit")
@@ -440,6 +467,17 @@ class RawProcessor:
         )
         for text in legend3.get_texts():
             text.set_fontname("Arial")
+
+        # Generate chemical structure from SMILES string
+        chem_struct_img = self.smiles_to_structure(smiles, img_size=(350, 350))
+
+        # Convert PIL image to array so it can be displayed
+        chem_struct_arr = np.array(chem_struct_img)
+
+        # Insert the chemical structure above the title for ax1
+        insert_ax = fig.add_axes([0.2, 0.7, 0.25, 0.25])
+        insert_ax.imshow(chem_struct_arr)
+        insert_ax.axis("off")
 
         # Plot MS1 scan
         ax1.plot(
@@ -488,6 +526,10 @@ class RawProcessor:
         ax1.spines["bottom"].set_linewidth(1.5)
         legend1 = ax1.legend(
             loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
+        )
+        warnings.filterwarnings(
+            "ignore",
+            message="This figure includes Axes that are not compatible with tight_layout, so results might be incorrect",
         )
         for text in legend1.get_texts():
             text.set_fontname("Arial")
@@ -660,6 +702,9 @@ class RawProcessor:
                 ms1_function (int) -- MS1 function number.
                 mobility_function (int) -- mobility function number.
                 mz_tolerance (float) -- m/z tolerance value to extract data.
+        returns:
+                (.xlsx) -- Excel spreadsheet containing the extracted data for each feature.
+                (.png) -- Image displaying the chemical structure, MS1 scan, EIC, and EIM.
         """
         # Set the input parameters
         self.calibration_file = calibration_file
@@ -686,13 +731,14 @@ class RawProcessor:
         for i, row in df_input.iterrows():
 
             # Extract the path to .raw file, m/z, and sample type (i.e., sample or blank)
-            file_name, mz, sample_type, gradient, adduct, compound_name = (
+            file_name, mz, sample_type, gradient, adduct, compound_name, smiles = (
                 row["File Name"],
                 row["Target m/z"],
                 row["Sample Type"],
                 row["Gradient"],
                 row["Adduct"],
                 row["Compound Name"],
+                row["SMILES"],
             )
 
             # Print the current m/z being queried to the terminal
@@ -848,6 +894,7 @@ class RawProcessor:
                     fname_combined,
                     mz_spectrum,
                     intensity_spectrum,
+                    smiles,
                 )
 
         # Export DataFrame containing extracted spectral features to Excel file (.xlsx)
