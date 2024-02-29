@@ -53,6 +53,10 @@ class RawProcessor:
                 smiles (str) -- SMILES string.
                 img_size (tuple) -- image size. Default is (100, 100).
         """
+
+        # Check if the string is valid
+        if not isinstance(smiles, str) or smiles.strip() == "":
+            return None
         mol = Chem.MolFromSmiles(smiles)
         if mol:
             img = Draw.MolToImage(mol, size=img_size)
@@ -359,7 +363,7 @@ class RawProcessor:
         # Add LC chromatogram peak annotations
         for j in peak_indices:
             label = str(rt[j])
-            label_y_pos = max(rt_i) + 1500
+            label_y_pos = max(rt_i) + 0.02 * max(rt_i)
             ax2.annotate(
                 label[:4],
                 xy=(rt[j], label_y_pos),
@@ -472,12 +476,13 @@ class RawProcessor:
         chem_struct_img = self.smiles_to_structure(smiles, img_size=(350, 350))
 
         # Convert PIL image to array so it can be displayed
-        chem_struct_arr = np.array(chem_struct_img)
+        if chem_struct_img is not None:
+            chem_struct_arr = np.array(chem_struct_img)
 
-        # Insert the chemical structure above the title for ax1
-        insert_ax = fig.add_axes([0.2, 0.7, 0.25, 0.25])
-        insert_ax.imshow(chem_struct_arr)
-        insert_ax.axis("off")
+            # Insert the chemical structure above the title for ax1
+            insert_ax = fig.add_axes([0.2, 0.7, 0.25, 0.25])
+            insert_ax.imshow(chem_struct_arr)
+            insert_ax.axis("off")
 
         # Plot MS1 scan
         ax1.plot(
@@ -525,7 +530,11 @@ class RawProcessor:
         ax1.spines["left"].set_linewidth(1.5)
         ax1.spines["bottom"].set_linewidth(1.5)
         legend1 = ax1.legend(
-            loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
+            loc="upper right",
+            frameon=True,
+            fontsize=10,
+            edgecolor="black",
+            facecolor="white",
         )
         warnings.filterwarnings(
             "ignore",
@@ -664,7 +673,8 @@ class RawProcessor:
 
         # If no peaks are found within tolerance, return the target m/z
         if not potential_peaks:
-            return target_mz, 0
+
+            return (target_mz, 0), 0
 
         # Assume the most intense peak is the monoisotopic peak
         monoisotopic_peak = max(potential_peaks, key=lambda x: x[1])
@@ -764,6 +774,9 @@ class RawProcessor:
             (monoisotopic_mz, monoisotopic_intensity), _ = self.observed_mz(
                 identified_peaks, mz, self.mz_tolerance
             )
+
+            if monoisotopic_mz == 0:
+                continue
 
             # Extract m/z-selected ion chromatogram (EIC) from the .raw file using theoretical m/z value
             # Requires user-inputted MS1 function number and desired m/z tolerance
