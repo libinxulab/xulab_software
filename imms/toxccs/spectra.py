@@ -602,7 +602,10 @@ class SpectralProcessor:
         )
         for text in legend2.get_texts():
             text.set_fontname("Arial")
-        max_intensity_y_limit = max(rt_i_ms1) + 0.1 * max(rt_i_ms1)
+        max_intensity_ms1 = max(rt_i_ms1)
+        max_intensity_ms2 = max(rt_i_ms2)
+        max_intensity_both = max(max_intensity_ms1, max_intensity_ms2)
+        max_intensity_y_limit = max_intensity_both + 0.1 * max_intensity_both
         y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)
         ax2.set_yticks(y_tick_values)
         ax2.set_yticklabels(
