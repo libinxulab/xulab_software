@@ -19,9 +19,10 @@ from matplotlib.lines import Line2D
 from scipy.optimize import curve_fit
 from scipy.signal import convolve, gaussian, find_peaks
 from dhrmasslynxapi.reader import MassLynxReader
-
-# TODO
-# Implement plotting diagram that displays the EIC and EIM + indices, full extracted spectrum, and top 5 peaks
+from rdkit import Chem
+from rdkit.Chem import Draw
+import io
+from PIL import Image
 
 # Set global font conditions for figures
 params = {"font.family": "Arial", "font.weight": "bold"}
@@ -38,6 +39,25 @@ class SpectralProcessor:
                 feature_list (str) -- path to the Excel file (.xlsx). containing the target list.
         """
         self.feature_list = feature_list
+
+    def smiles_to_structure(self, smiles, img_size=(100, 100)):
+        """
+        SpectralProcessor.smiles_to_structure
+        description:
+                Converts a SMILES string to a chemical structure.
+        parameters:
+                smiles (str) -- SMILES string.
+                img_size (tuple) -- image size. Default is (100, 100).
+        """
+        # Check if the string is valid
+        if not isinstance(smiles, str) or smiles.strip() == "":
+            return None
+        mol = Chem.MolFromSmiles(smiles)
+        if mol:
+            img = Draw.MolToImage(mol, size=img_size)
+            return img
+        else:
+            return None
 
     def export_to_excel(self, processed_spectrum, file_name, compound_name, adduct):
         """
@@ -168,13 +188,53 @@ class SpectralProcessor:
 
         return identified_peaks, smoothed_intensity
 
+    def extract_aif_rt(self, file_name, ms2_function, rt_start, rt_end):
+        """
+        SpectralProcessor.extract_aif_rt
+        description:
+                Extracts the raw retention time-selected AIF spectrum for a given spectral feature.
+        parameters:
+                file_name (str) -- path to the .raw file.
+                ms2_function (int) -- MS2 function number.
+                rt_start (float) -- retention time of the start of the identified EIC peak.
+                rt_end (float) -- retention time of the end of the identified EIC peak.
+        """
+        # Initialize MassLynxReader object
+        rdr = MassLynxReader(file_name)
+
+        # Extract raw rt-selected AIF from the spectral feature using retention time indices
+        m, i = rdr.get_spectrum(ms2_function, rt_start, rt_end)
+
+        return np.array(m), np.array(i)
+
+    def ms2_chromatogram(self, file_name, ms2_function, mz, mz_tolerance):
+        """
+        SpectralProcessor.ms2_chromatogram
+        description:
+                Extracts the MS2 level chromatogram for a given m/z and tolerance.
+        parameters:
+                file_name (str) -- path to the .raw file.
+                ms2_function (int) -- MS2 function number.
+                mz (float) -- m/z value used to extract the MS2 level chromatogram (presumably the observed monoisotopic peak).
+                mz_tolerance (float) -- m/z tolerance for extraction.
+        returns:
+                (tuple): array of retention times and corresponding intensity values.
+        """
+        # Initialize MassLynxReader object
+        rdr = MassLynxReader(file_name)
+
+        # Extract the m/z-selected MS2 level chromatogram
+        rt_array, rt_i_array = rdr.get_chrom(ms2_function, mz, mz_tolerance)
+
+        return np.array(rt_array), np.array(rt_i_array)
+
     def extract_aif(
         self, file_name, mobility_function, rt_start, rt_end, dt_start, dt_end
     ):
         """
         SpectralProcessor.extract_aif
         description:
-                Extracts the raw AIF spectrum for a given spectral feature.
+                Extracts the raw retention AND drift time-selected selected AIF spectrum for a given spectral feature.
         parameters:
                 file_name (str) -- path to the .raw file.
                 mobility_function (int) -- mobility function number.
@@ -195,44 +255,99 @@ class SpectralProcessor:
 
         return np.array(m), np.array(i)
 
-    def process_extracted_spectrum(self, mz_array, intensity_array):
+    def extract_eim(
+        self, file_name, function_number, mz, mz_tolerance, rt_start, rt_end
+    ):
+        """
+        SpectralProcessor.extract_eim
+        description:
+                Extracts the raw retention time-selected EIM for a given m/z value.
+        parameters:
+                file_name (str) -- path to the .raw file.
+                function_number (int) -- function number (i.e., MS1 or MS2 level, depending on status of the peak being processed).
+                mz (float) -- m/z value used to extract the mobilogram.
+                rt_start (float) -- start of the retention time range.
+                rt_end (float) -- end of the retention time range.
+        returns:
+                (tuple) -- arrays of drift times and corresponding intensity vaules.
+        """
+        # Initialize MassLynxReader object
+        rdr = MassLynxReader(file_name)
+
+        # Extract m/z + retention time-selected mobilogram
+        dt, intensity = rdr.get_filtered_chrom(
+            function_number, float(mz), mz_tolerance, rt_start, rt_end
+        )
+
+        return np.array(dt), np.array(intensity)
+
+    def process_extracted_spectrum(
+        self, mz_array, intensity_array, monoisotopic_mz, mz_tolerance=0.025
+    ):
         """
         SpectralProcessor.process_extracted_spectrum
-        decription:
-                Processes the extracted AIF spectrum to normalize intensities and identify the top 5 most intense peaks.
+        description:
+                Processes the extracted AIF spectrum to normalize intensities and identify the top 5 most unique (i.e., non-isotopologue) peaks.
         parameters:
-                mz_array (numpy.ndarray): array of m/z values.
-                intensity_array (numpy.ndarray): array of intensity values.
+                mz_array (numpy.ndarray) -- array of m/z values.
+                intensity_array (numpy.ndarray) -- array of intensity values.
+                monoisotopic_mz (float) -- observed monoisotopic peak from MS1 scan used to remove non-relevant peaks.
+                mz_tolerance (float) -- m/z tolerance around the monoisotopic peak for filtering. Default is 0.025 Da.
         returns:
-                dict: a dictionary containing the raw intensities, normalized intensities, and the top 5 most intense peaks with their intensities normalized to the most intense peak among the top 5.
+                dict: a dictionary comtaining the raw intensities, normalized intensities, and the top 5 most intense peaks with their intensities normalized to the most intense peak among the top 5.
+
         """
         # Normalize the intensities to the most intense peak
-        max_intensity_entire_spectrum = np.max(intensity_array)
-        normalized_intensity_entire_spectrum = (
-            intensity_array / max_intensity_entire_spectrum
-        ) * 100
+        normalized_intensity = intensity_array / np.max(intensity_array) * 100
 
-        # Identify the top 5 most intense peaks
-        peak_indices = np.argsort(intensity_array)[::-1][:5]
-        top_5_mz = mz_array[peak_indices]
-        top_5_intensity_raw = intensity_array[peak_indices]
+        # Remove peaks that are above the monoisotopic peak + 0.025 Da
+        below_monoisotopic_indices = np.where(
+            mz_array < monoisotopic_mz + mz_tolerance
+        )[0]
 
-        # Normalize the top 5 most intense peaks to the most intense peak among them
-        max_top_5_intensity = np.max(top_5_intensity_raw)
-        normalized_top_5_intensity = top_5_intensity_raw / max_top_5_intensity * 100
+        # Apply filter to mz, intensity, and normalized intensity arrays
+        filtered_mz = mz_array[below_monoisotopic_indices]
+        filtered_intensity = intensity_array[below_monoisotopic_indices]
+        filtered_normalized_intensity = normalized_intensity[below_monoisotopic_indices]
+
+        # Sort peaks by descending intensity
+        sorted_indices = np.argsort(filtered_intensity)[::-1]
+        sorted_mz = filtered_mz[sorted_indices]
+        sorted_intensity = filtered_intensity[sorted_indices]
+        sorted_normalized_intensity = filtered_normalized_intensity[sorted_indices]
+
+        # Initialize the list to store indices of the top 5 peaks
+        top_5_indices = []
+        for i in range(len(sorted_mz)):
+            if len(top_5_indices) >= 5:
+
+                # Stop when we have collected the top 5 unique peaks
+                break
+            current_mz = sorted_mz[i]
+
+            # Ensure the current peak is not within M+3 of any peak already in the top 5
+            if not any(abs(current_mz - sorted_mz[j]) <= 3 for j in top_5_indices):
+                top_5_indices.append(i)
+
+        # Extract the final top 5 unique peaks using the indices
+        final_top_5_mz = sorted_mz[top_5_indices]
+        final_top_5_intensity_raw = sorted_intensity[top_5_indices]
+        final_top_5_normalized_intensity = sorted_normalized_intensity[top_5_indices]
 
         # Construct the top 5 peak information
         top_5_peak_info = [
             {"mz": mz, "intensity_raw": raw, "intensity_normalized_to_top_5": norm}
             for mz, raw, norm in zip(
-                top_5_mz, top_5_intensity_raw, normalized_top_5_intensity
+                final_top_5_mz,
+                final_top_5_intensity_raw,
+                final_top_5_normalized_intensity,
             )
         ]
 
         return {
             "mz": mz_array,
             "intensity_raw": intensity_array,
-            "normalized_intensity": normalized_intensity_entire_spectrum,
+            "normalized_intensity": normalized_intensity,
             "top_5_peak_info": top_5_peak_info,
         }
 
@@ -357,6 +472,211 @@ class SpectralProcessor:
 
         return peak_indices, rt_list, areas, peak_ranges, popt_multi_gaussian, mu_values
 
+    def combined_figure(
+        self,
+        mz_spectrum,
+        intensity_spectrum,
+        top_5_peak_info,
+        observed_mz,
+        compound_name,
+        adduct,
+        smiles,
+        fname_combined,
+        mz,
+        rt_ms1,
+        rt_i_ms1,
+        rt_ms2,
+        rt_i_ms2,
+        eim_data,
+    ):
+        """
+        SpectralProcessor.combined_figure
+        description:
+                Generates a figure containing the extracted AIF spectrum and a separate spectrum showing the top 5 most intense peaks.
+        parameters:
+                mz_spectrum (numpy.ndarray) -- array of m/z values.
+                intensity_spectrum (numpy.ndarray) -- array of intensity values.
+                top_5_peak_info (dict) -- dictionary containing m/z, raw intensity, and normalized intensity values of the top 5 most intense peaks from the AIF spectrum.
+                observed_mz (float) -- observed monoisotopic m/z value (i.e., the parent ion).
+                compound_name (str) -- name of the compound being analyzed.
+                adduct (str) -- adduct type of the compound being analyzed.
+                smiles (str) -- SMILES string of the compound being analyzed.
+                fname_combined (str) -- file name for saving the plot.
+                mz (float) -- target m/z value used to extract the raw data.
+        """
+        # Plot setup
+        fig, (ax1, ax2, ax3) = plt.subplots(nrows=3, ncols=1, figsize=(6.4, 9.6))
+
+        # Plot full MS2 spectrum
+        ax1.plot(mz_spectrum, intensity_spectrum, "k-", lw=1, label="MS2 Data")
+
+        # Annotate the top 5 most intense peaks
+        intensity_range = max(intensity_spectrum) - min(intensity_spectrum)
+        normalized_offset_percentage = 0.05
+        normalized_offset = intensity_range * normalized_offset_percentage
+        for i, peak in enumerate(top_5_peak_info):
+
+            # Draw vertical lines matching peak intensity
+            if i == 0:
+                ax1.vlines(
+                    x=peak["mz"],
+                    ymin=0,
+                    ymax=peak["intensity_raw"],
+                    colors="magenta",
+                    lw=2,
+                    label="Top 5 Peaks",
+                )
+            else:
+                ax1.vlines(
+                    x=peak["mz"],
+                    ymin=0,
+                    ymax=peak["intensity_raw"],
+                    colors="magenta",
+                    lw=2,
+                )
+            adjusted_x_position = peak["mz"]
+            adjusted_y_position = peak["intensity_raw"] + normalized_offset
+            ax1.text(
+                adjusted_x_position,
+                adjusted_y_position,
+                f"{peak['mz']:.4f}",
+                ha="center",
+                va="top",
+                fontsize=10,
+                color="black",
+                fontweight="bold",
+                fontname="Arial",
+            )
+        ax1.legend(
+            loc="best", fontsize=10, frameon=True, edgecolor="black", facecolor="white"
+        )
+        # Format MS2 spectrum
+        ax1.set_xlim(50, observed_mz + 10)
+        max_intensity_y_limit = max(intensity_spectrum) + 0.1 * max(intensity_spectrum)
+        y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)
+        ax1.set_yticks(y_tick_values)
+        tick_label_fontprops = {"weight": "bold", "family": "Arial", "size": 10}
+        ax1.set_yticklabels(
+            [int(y) for y in y_tick_values], fontdict=tick_label_fontprops
+        )
+        ax1.set_ylim(0, max_intensity_y_limit)
+        ax1.set_xlabel("m/z", fontweight="bold", fontname="Arial", fontsize=10)
+        ax1.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
+        ax1.set_title(
+            f"{compound_name}\n{mz:.4f} {adduct}\nMS2 Spectrum",
+            fontsize=12,
+            fontweight="bold",
+            fontname="Arial",
+        )
+        legend1 = ax1.legend(
+            loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
+        )
+        for text in legend1.get_texts():
+            text.set_fontname("Arial")
+        ax1.spines["top"].set_visible(False)
+        ax1.spines["right"].set_visible(False)
+        ax1.spines["left"].set_linewidth(1.5)
+        ax1.spines["bottom"].set_linewidth(1.5)
+        ax1.tick_params(axis="both", which="major", labelsize=10, width=1)
+        for label in ax1.get_xticklabels():
+            label.set_fontname("Arial")
+            label.set_fontweight("bold")
+            label.set_fontsize(10)
+
+        # Plot MS1 and MS2 level chromatograms
+        ax2.plot(rt_ms1, rt_i_ms1, "b-", lw=1.75, label="MS1 Chromatogram")
+        ax2.plot(rt_ms2, rt_i_ms2, "r-", lw=1.75, label="MS2 Chromatogram")
+        ax2.set_xlabel(
+            "Retention Time [min]", fontweight="bold", fontname="Arial", fontsize=10
+        )
+        ax2.set_xlim(0, 1.3)
+        ax2.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
+        ax2.set_title(
+            "Precursor Ion Extracted Chromatograms",
+            fontsize=12,
+            fontweight="bold",
+            fontname="Arial",
+        )
+        legend2 = ax2.legend(
+            loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
+        )
+        for text in legend2.get_texts():
+            text.set_fontname("Arial")
+        max_intensity_y_limit = max(rt_i_ms1) + 0.1 * max(rt_i_ms1)
+        y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)
+        ax2.set_yticks(y_tick_values)
+        ax2.set_yticklabels(
+            [int(y) for y in y_tick_values], fontdict=tick_label_fontprops
+        )
+        ax2.set_ylim(0, max_intensity_y_limit)
+        ax2.spines["top"].set_visible(False)
+        ax2.spines["right"].set_visible(False)
+        ax2.spines["left"].set_linewidth(1.5)
+        ax2.spines["bottom"].set_linewidth(1.5)
+        ax2.tick_params(axis="both", which="major", labelsize=10, width=1)
+        for label in ax2.get_xticklabels():
+            label.set_fontname("Arial")
+            label.set_fontweight("bold")
+            label.set_fontsize(10)
+
+        # Plot EIMs
+        latest_drift_time_apex = 0
+        colors = ["red", "green", "blue", "orange", "purple"]
+        for i, ((dt, intensity), peak_info) in enumerate(
+            zip(eim_data, top_5_peak_info)
+        ):
+            ax3.plot(
+                dt,
+                intensity,
+                color=colors[i],
+                lw=1.75,
+                label=f"{peak_info['mz']:.4f} m/z",
+            )
+            apex_index = np.argmax(intensity)
+            apex_drift_time = dt[apex_index]
+            latest_drift_time_apex = max(latest_drift_time_apex, apex_drift_time)
+        ax3.set_xlabel(
+            "Drift Time [ms]", fontsize=10, fontweight="bold", fontname="Arial"
+        )
+        max_intensity_all_mobilograms = 0
+        for _, intensity in eim_data:
+            max_intensity = max(intensity)
+            max_intensity_all_mobilograms = max(
+                max_intensity_all_mobilograms, max_intensity
+            )
+        max_intensity_y_limit = (
+            max_intensity_all_mobilograms + 0.1 * max_intensity_all_mobilograms
+        )
+        y_tick_values = np.linspace(0, max_intensity_y_limit, num=10, endpoint=True)
+        ax3.set_yticks(y_tick_values)
+        ax3.set_yticklabels(
+            [int(y) for y in y_tick_values], fontdict=tick_label_fontprops
+        )
+        ax3.set_ylim(0, max_intensity_y_limit)
+        ax3.set_ylabel("Intensity", fontsize=10, fontweight="bold", fontname="Arial")
+        ax3.set_title(
+            "Extracted Mobilograms", fontsize=12, fontweight="bold", fontname="Arial"
+        )
+        ax3.set_xlim(0, latest_drift_time_apex + 2)
+
+        legend3 = ax3.legend(
+            loc="best", frameon=True, fontsize=10, edgecolor="black", facecolor="white"
+        )
+        for text in legend3.get_texts():
+            text.set_fontname("Arial")
+        ax3.tick_params(axis="both", which="major", labelsize=10, width=1)
+        for label in ax3.get_xticklabels():
+            label.set_fontname("Arial")
+            label.set_fontweight("bold")
+            label.set_fontsize(10)
+        ax3.spines["top"].set_visible(False)
+        ax3.spines["right"].set_visible(False)
+        ax3.spines["left"].set_linewidth(1.5)
+        ax3.spines["bottom"].set_linewidth(1.5)
+        plt.tight_layout()
+        plt.savefig(fname_combined, dpi=300, bbox_inches="tight")
+        plt.close()
+
     def extract_spectra(
         self, ms1_function, ms2_function, mobility_function, mz_tolerance
     ):
@@ -384,6 +704,11 @@ class SpectralProcessor:
         if not os.path.exists(data_directory):
             os.makedirs(data_directory)
 
+        # Generate a new folder called "Extracted Spectra Figures" in the directory if not already present
+        figures_directory = "Extracted Spectra Figures"
+        if not os.path.exists(figures_directory):
+            os.makedirs(figures_directory)
+
         # Iterate over each row in the feature list DataFrame
         print(
             "\n...Extracting fragmentation spectra for spectral features in {}...".format(
@@ -403,6 +728,7 @@ class SpectralProcessor:
                 dt,
                 sample_type,
                 mz,
+                smiles,
             ) = (
                 row["File Name"],
                 row["Compound Name"],
@@ -412,6 +738,7 @@ class SpectralProcessor:
                 row["Observed Drift Time (ms)"],
                 row["Sample Type"],
                 row["Target m/z"],
+                row["SMILES"],
             )
 
             # Print the current feature being processed to the terminal
@@ -464,26 +791,25 @@ class SpectralProcessor:
                 rt_end = min(rt[-1], rt[end_idx] + fixed_bound)
 
             # Use the EIC peak indices to extract the (m/z,rt)-selected ion mobilogram (EIM)
+            # Need to use MS1 level mobility function number here
             t, dt_i = rdr.get_filtered_chrom(
-                self.mobility_function,
+                0,
                 float(monoisotopic_mz),
                 self.mz_tolerance,
                 rt_min=rt_start,
                 rt_max=rt_end,
             )
 
-            # Parameter for smoothing Gaussian function
-            t_refined = np.arange(min(t), max(t), float(0.001))
-
-            # Initialzie and fit Gaussian function
+            # Smooth and fit EIM to Gaussian function
             A, B, C = self.peak_fit(t, dt_i)
+            t_refined = np.arange(min(t), max(t), 0.01)
             fit_i = self.gaussian_fit(t_refined, A, B, C)
             fitted_dt = float(round(B, 2))
 
             # Ensure that the extracted drift time is equal to the drift time of the extracted spectral feature
             # Because this value is extracted using the same functions, it should be identical
             # Using a threshold just in case
-            if abs(fitted_dt - dt) <= 0.1:
+            if abs(fitted_dt - dt) <= 0.2:
 
                 # Calculate full width at 1% maximum (FW1M) bounds of EIM
                 fw1m = 2 * np.sqrt(-2 * C**2 * np.log(0.01))
@@ -496,17 +822,83 @@ class SpectralProcessor:
                 dt_start = max(dt_start, min(t))
                 dt_end = min(dt_end, max(t))
 
+            """# Extract rt-selected AIF spectrum for the feature using identified EIC bounds
+            extracted_mz, extracted_intensity = self.extract_aif_rt(
+                file_name, self.ms2_function, rt_start, rt_end
+            )"""
+
             # Extract (rt,dt)-selected AIF spectrum for the feature using identified EIC and EIM bounds
             extracted_mz, extracted_intensity = self.extract_aif(
-                file_name, self.mobility_function, rt_start, rt_end, dt_start, dt_end
+                file_name,
+                self.mobility_function,
+                rt_start,
+                rt_end,
+                dt_start,
+                dt_end,
             )
 
             # Store and process the extracted AIF spectrum to get normalized intensities and top 5 most intense peaks
             processed_spectrum = self.process_extracted_spectrum(
-                extracted_mz, extracted_intensity
+                extracted_mz, extracted_intensity, monoisotopic_mz, self.mz_tolerance
             )
 
             # Export the processed spectrum to an Excel file for each compound
             output_excel_path = self.export_to_excel(
                 processed_spectrum, file_name, compound_name, adduct
+            )
+
+            # Generate file name for combined figure
+            fname_combined = (
+                f"{figures_directory}/{compound_name}_{mz}_{adduct}_{file_name}.png"
+            )
+
+            # Fetch MS2 level chromatogram for combined figure
+            rt_ms2, rt_i_ms2 = self.ms2_chromatogram(
+                file_name, self.ms2_function, monoisotopic_mz, self.mz_tolerance
+            )
+
+            # Fetch EIMs for each of the top 5 most intense peaks in the extracted AIF spectrum
+            eim_data = []
+            for peak in processed_spectrum["top_5_peak_info"]:
+                mz_peak = peak["mz"]
+                if abs(mz_peak - monoisotopic_mz) <= self.mz_tolerance:
+
+                    # If precursor peak is present, extract from MS1 level
+                    dt, intensity = self.extract_eim(
+                        file_name,
+                        self.ms1_function,
+                        mz_peak,
+                        self.mz_tolerance,
+                        rt_start,
+                        rt_end,
+                    )
+                else:
+
+                    # Extract from MS2 level
+                    dt, intensity = self.extract_eim(
+                        file_name,
+                        self.ms2_function,
+                        mz_peak,
+                        self.mz_tolerance,
+                        rt_start,
+                        rt_end,
+                    )
+                eim_data.append((dt, intensity))
+
+            # Generate combined figure
+            self.combined_figure(
+                mz_spectrum=extracted_mz,
+                intensity_spectrum=extracted_intensity,
+                top_5_peak_info=processed_spectrum["top_5_peak_info"],
+                observed_mz=monoisotopic_mz,
+                compound_name=compound_name,
+                adduct=adduct,
+                smiles=smiles,
+                fname_combined=fname_combined,
+                mz=mz,
+                rt_ms1=rt_array,
+                rt_i_ms1=rt_i_array,
+                rt_ms2=rt_ms2,
+                rt_i_ms2=rt_i_ms2,
+                eim_data=eim_data,
             )
