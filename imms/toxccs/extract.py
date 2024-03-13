@@ -403,7 +403,7 @@ class RawProcessor:
             label.set_fontsize(10)
         ax2.spines["top"].set_visible(False)
         ax2.spines["right"].set_visible(False)
-        ax2.spines["right"].set_linewidth(1.5)
+        ax2.spines["left"].set_linewidth(1.5)
         ax2.spines["bottom"].set_linewidth(1.5)
         legend2 = ax2.legend(
             loc="best",
