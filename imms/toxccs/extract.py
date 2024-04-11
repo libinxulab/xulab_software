@@ -542,8 +542,13 @@ class RawProcessor:
         )
         for text in legend1.get_texts():
             text.set_fontname("Arial")
-        plt.tight_layout()
-        plt.savefig(fname_combined, dpi=300, bbox_inches="tight")
+
+        # Attempt to save the figure
+        try:
+            plt.tight_layout()
+            plt.savefig(fname_combined, dpi=300, bbox_inches="tight")
+        except Exception as e:
+            plt.savefig(fname_combined, dpi=300)
         plt.close()
 
     def export_to_excel(self):
