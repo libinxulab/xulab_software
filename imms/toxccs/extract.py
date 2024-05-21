@@ -564,6 +564,7 @@ class RawProcessor:
             columns=[
                 "File Name",
                 "Compound Name",
+                "SMILES",
                 "Adduct",
                 "Target m/z",
                 "Observed m/z",
@@ -739,7 +740,7 @@ class RawProcessor:
 
         # Iterate over each row in the target list DataFrame
         print(
-            "\n...CCS Calibration successful. Extracting data from the raw files using precursor target list {}...".format(
+            "\n...CCS calibration successful. Extracting data from the raw files using precursor target list {}...".format(
                 self.target_list
             )
         )
@@ -867,6 +868,7 @@ class RawProcessor:
                     [
                         file_name,
                         compound_name,
+                        smiles,
                         adduct,
                         mz,
                         monoisotopic_mz,
