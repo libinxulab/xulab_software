@@ -140,7 +140,7 @@ The `MultiRawProcessor` object is also initialized with the path to an Excel fil
 ```python
 from toxccs.multi_extract import MultiRawProcessor
 
-# initialize RawProcessor object 
+# initialize MultiRawProcessor object 
 data = MultiRawProcessor("path/to/target/list.xlsx")
 ```
 
@@ -170,7 +170,7 @@ Excel (.xlsx) spreadsheet containing the following extracted data for each targe
 * EIM FWHM (ms): full-width at half maximum of the extracted ion mobilogram
 * Two-Peak EIM Resolution: calculated resolution between two neigboring extracted ion mobilograms; calculated value is always placed in the cell first peak of the two
  
-Finally, `RawProcessor.multi_extract` creates a folder in the root directory (if it does not already exist) called "Extracted Reprocessed Data," where images of the extracted, smoothed, and Gaussian-fitted MS1, chromatographic, and mobility data are saved to. 
+Finally, `MultiRawProcessor.multi_extract` creates a folder in the root directory (if it does not already exist) called "Extracted Reprocessed Data," where images of the extracted, smoothed, and Gaussian-fitted MS1, chromatographic, and mobility data are saved to. 
 
 #### Example
 ```python
@@ -201,7 +201,7 @@ The `DDARawProcessor` object is initialized with the path to an Excel file (.xls
 ```python
 from toxccs.dda_extract import DDARawProcessor
 
-# initialize RawProcessor object 
+# initialize DDARawProcessor object 
 data = DDARawProcessor("path/to/target/list.xlsx")
 ```
 In the current version of `toxccs`, the target list **must** contain the following headers and information:
@@ -240,7 +240,7 @@ Excel (.xlsx) spreadsheet containing the following extracted data:
 * Channel Number: value of the Channel from which the MS/MS fragmentation spectrum was extracted
 * Mass error (ppm): mass error between the target m/z and observed m/z
 
-Finally, `RawProcessor.extract` creates a folder in the root directory (if it do not already exist) called "Extracted Data," where images of the chromatographic and MS/MS spectral data are saved to. 
+Finally, `DDARawProcessor.extract` creates a folder in the root directory (if it do not already exist) called "Extracted Data," where images of the chromatographic and MS/MS spectral data are saved to. 
 
 #### Example
 ```python
