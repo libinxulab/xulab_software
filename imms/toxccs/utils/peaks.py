@@ -5,8 +5,47 @@
     12/20/24
 
     description:
-            Module with utilities to identify the putative monoisotpic peak within centroided mass spectrometry data. 
+            Module with utilities to process mass spectrometric peaks. 
 """
+
+import numpy as np
+
+
+def subtract_background_spectrum(
+    main_mz, main_intensity, background_mz, background_intensity, mz_tolerance
+):
+    """
+    utils/subtract_background_spectrum
+    description:
+            Subtracts overlapping peaks from the extracted MS/MS spectrum based on a background spectrum.
+    parameters:
+            main_mz (numpy.ndarray) -- m/z values of the main MS/MS spectrum.
+            main_intensity (numpy.ndarray) -- intensity values of the main MS/MS spectrum.
+            background_mz (numpy.ndarray) -- m/z values of the background spectrum.
+            background_intensity (numpy.ndarray) -- intensity values of the background spectrum.
+            mz_tolerance (float) -- tolerance for matching peaks in Da.
+    returns:
+            filtered_mz (numpy.ndarray) -- filtered m/z values after background subtraction.
+            filtered_intensity (numpy.ndarray) -- filtered intensity values after background subtraction.
+    """
+    if len(background_mz) == 0:
+        return main_mz, main_intensity
+
+    # Create a mask to exclude peaks that overlap with the background spectrum
+    mask = np.array(
+        [
+            not any(
+                abs(main_peak - bg_peak) <= mz_tolerance for bg_peak in background_mz
+            )
+            for main_peak in main_mz
+        ]
+    )
+
+    # Filter the main spectrum
+    filtered_mz = main_mz[mask]
+    filtered_intensity = main_intensity[mask]
+
+    return filtered_mz, filtered_intensity
 
 
 def monoisotopic_peak(identified_peaks, target_mz, tolerance=0.025):

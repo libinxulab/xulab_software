@@ -5,7 +5,7 @@ Ryan Nguyen (ryan97@uw.edu)
 12/21/24
 
 description:
-        Sub-package with utility for calculating peak resolution.
+        Sub-package with utility for calculating mass spectrometric peak metrics (i.e, resolution and mass accuracy).
 """
 
 
@@ -50,3 +50,17 @@ def calculate_peak_resolution(dt_a, fwhm_a, dt_b, fwhm_b):
     except (ValueError, TypeError) as e:
         print(f"Error calculating resolution: {e}")
         return None
+
+
+def calculate_mass_error(theoretical_mz, observed_mz):
+    """
+    toxccs/utils/metrics.py/calculate_mass_error
+    description:
+            Calculates mass error in parts per million (ppm).
+    parameters:
+            theoretical_mz (float) -- theoretical m/z value.
+            observed_mz (float) -- observed m/z value.
+    returns:
+            (float) -- mass error in ppm.
+    """
+    return ((observed_mz - theoretical_mz) / theoretical_mz) * 1e6
