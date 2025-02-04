@@ -2,10 +2,10 @@
 toxccs/dda_extract/DDARawProcessor.py
 
 Ryan Nguyen (ryan97@uw.edu)
-12/24/24
+2/4/25
 
 description:
-        Main logic for extracting MS/MS fragmentation spectra from Waters Fast-DDA .raw files. Note that the data must be centroided prior to implementation.
+        Main logic for extracting MS/MS fragmentation spectra from Waters Fast DDA .raw files. Note that the data must be centroided prior to implementation.
 """
 
 import pandas as pd
@@ -80,6 +80,7 @@ class DDARawProcessor:
                 "Gradient",
                 "Column Type",
                 "Observed Retention Time (min)",
+                "Flags",
             ],
         )
         df_features.to_excel(output_file, index=False)
@@ -196,7 +197,6 @@ class DDARawProcessor:
                 peak_apex = rt_list[max_intensity_index]
 
                 # Use peak indices to define the window
-                # It appears that rt_min should be near apex of peak because most intense MS/MS event typically occurs shortly after?
                 start_idx, end_idx = peak_ranges[max_intensity_index]
                 rt_min = rt[start_idx]
                 rt_max = rt[end_idx]
@@ -209,8 +209,96 @@ class DDARawProcessor:
                     rt_max = min(rt[-1], peak_apex + fixed_bound)
                 found_peak = True
             else:
-                print("\tNo valid MS1 chromatographic peak identified for target.")
+                print("\t\tNo valid MS1 chromatographic peak identified for target.")
                 continue
+
+            # Extract MS1 survey scan scan coordinates defined by rt_min and rt_max
+            try:
+                scan_indices_ms1 = rdr._MassLynxReader__get_scan_indices(
+                    0, rt_min, rt_max
+                )
+                if scan_indices_ms1:
+                    scan_min, scan_max = scan_indices_ms1[0], scan_indices_ms1[-1]
+                    scan_times = [rdr.scan_times[0][idx] for idx in scan_indices_ms1]
+                    # print(f"\tMS1 Scan Range: {scan_min} - {scan_max}")
+                    # print("\tScan Index - Retention Time Mapping:")
+                    # for scan_idx, scan_time in zip(scan_indices_ms1, scan_times):
+                    # print(f"\tScan {scan_idx}: {scan_time:.4f} min")
+                else:
+                    print(
+                        "\t\tNo corresponding MS1 scans found within the specified retention time window."
+                    )
+            except Exception as e:
+                print(f"\t\tError retrieving MS1 scan numbers: {e}")
+
+            # Initialize values and lists to track the precursor ion peak across MS1 survey scans
+            most_intense_ms1_scan_index = None
+            most_intense_precursor_mz = None
+            most_intense_precursor_intensity = -np.inf
+            best_top_peaks_mz = []
+            best_top_peaks_intensity = []
+
+            # Extract the MS1 survey scan spectrum for each scan in scan_indices_ms1
+            try:
+                for scan_idx in scan_indices_ms1:
+                    scan_mz, scan_intensity = rdr.scan_reader.ReadScan(0, scan_idx)
+
+                    # Save the extracted MS1 survey spectrum from each scan
+                    scan_mz = np.array(scan_mz)
+                    scan_intensity = np.array(scan_intensity)
+
+                    # Identify the precursor ion peak within the extracted MS1 survey spectrum
+                    (
+                        observed_precursor_ms1_mz,
+                        observed_precursor_ms1_intensity,
+                    ), _ = observed_mz(
+                        zip(
+                            scan_mz,
+                            scan_intensity,
+                        ),
+                        mz,
+                        self.mz_tolerance,
+                    )
+
+                    # Identify the top precursor_num most intense peaks in the scan
+                    top_indices = np.argsort(scan_intensity)[-num_precursors:][::-1]
+                    top_peaks_mz = scan_mz[top_indices]
+                    top_peaks_intensity = scan_intensity[top_indices]
+
+                    # Track the scan with the most intense precursor peak
+                    if (
+                        observed_precursor_ms1_intensity
+                        > most_intense_precursor_intensity
+                    ):
+                        most_intense_precursor_intensity = (
+                            observed_precursor_ms1_intensity
+                        )
+                        most_intense_precursor_mz = observed_precursor_ms1_mz
+                        most_intense_ms1_scan_index = scan_idx
+                        best_top_peaks_mz = top_peaks_mz
+                        best_top_peaks_intensity = top_peaks_intensity
+
+                # Print extracted data
+                if most_intense_ms1_scan_index is not None:
+                    print(
+                        f"\n\t\tMost intense MS1 survey scan: {most_intense_ms1_scan_index} ({rdr.scan_times[0][most_intense_ms1_scan_index]:.4f} min)"
+                    )
+                    print(
+                        f"\t\tPrecursor Ion Peak: m/z {most_intense_precursor_mz:.4f} Intensity {most_intense_precursor_intensity:.1f}"
+                    )
+                    print(f"\t\tTop {num_precursors} Peaks in Most Intense MS1 Scan:")
+                    print("")
+                    for rank, (mz_val, intensity_val) in enumerate(
+                        zip(best_top_peaks_mz, best_top_peaks_intensity), start=1
+                    ):
+                        print(
+                            f"\t\t\t{rank}. m/z: {mz_val:.4f} Intensity: {intensity_val:.1f}"
+                        )
+                    print("")
+                else:
+                    print("\n\t\tNo valid MS1 scan with intense precursor ion found.")
+            except Exception as e:
+                print(f"\n\t\tError processing MS1 survey scans: {e}")
 
             # Begin sequence for extracting MS/MS fragmentation spectrum
             # In a typical Waters Fast-DDA .raw file, fragmentation data from the most intense precursor at a given MS/MS timepoint are store in Channel 2 (MS1 survey scan data are stored in Channel 1)
@@ -220,14 +308,14 @@ class DDARawProcessor:
             max_intensity = -np.inf
             correct_channel = None
             ms2, ms2_i = None, None
+            nonzero_intensity_channels = []
 
             # Iterate through the possible Channels
             for channel_num in range(1, num_precursors + 1):
                 try:
 
                     # Extract MS/MS fragmentation spectrum from the current Channel
-                    # rt_m + 0.01 appears to be working
-                    rt_m = float(peak_apex) + 0.01
+                    # rt_m = float(peak_apex) + 0.01 optimized during testing
                     spectrum_mz, spectrum_intensity = rdr.get_spectrum(
                         channel_num, rt_min, rt_max
                     )
@@ -241,11 +329,9 @@ class DDARawProcessor:
                         )
                     )
 
-                    # print(
-                    # channel_num + 1,
-                    # observed_precursor_mz,
-                    # observed_precursor_intensity,
-                    # )
+                    # Save the Channel number for all instances where the precursor ion peak is detected
+                    if observed_precursor_intensity > 0:
+                        nonzero_intensity_channels.append(channel_num)
 
                     # Update the correct Channel if this spectrum has a higher precursor ion intensity
                     # The assumption is that the Channel storing the desired fragmentation data will have the most intense target precursor peak
@@ -260,14 +346,15 @@ class DDARawProcessor:
                         # Save the correct function number adjusted for indexing
                         adj_correct_channel = correct_channel + 1
 
-                        # Save the correct extracted MS/MS fragmentation spectrum
-                        # ms2, ms2_i = spectrum_mz, spectrum_intensity
-
                 except Exception as e:
-                    print(f"\tChannel {channel_num} could not be processed: {e}")
-
+                    print(f"\n\t\tChannel {channel_num} could not be processed: {e}")
+            if nonzero_intensity_channels:
+                formatted_channels = ", ".join(
+                    map(str, [ch + 1 for ch in nonzero_intensity_channels])
+                )
+                print(f"\t\tCandidate MS/MS Channels Identified: {formatted_channels}")
             if correct_channel is None:
-                print("\tNo valid MS2 Channel found for target.")
+                print("\n\t\tNo valid MS2 Channel found for target.")
                 continue
 
             # Iterate through individual scans in the accumulation window to find the scan containing the most intense target ion precursor
@@ -276,7 +363,6 @@ class DDARawProcessor:
             )
             most_intense_scan = None
             most_intense_value = -np.inf
-            most_intense_scan_index = None
             for scan_index in scan_indices:
                 scan_mz, scan_intensity = rdr.scan_reader.ReadScan(
                     correct_channel, scan_index
@@ -294,28 +380,120 @@ class DDARawProcessor:
                     most_intense_scan_index = scan_index
                 if most_intense_scan is not None:
                     ms2, ms2_i = most_intense_scan
-                    # print(f"Most intense scan identified: {most_intense_scan_index}")
 
-            # Calculate mass error in ppm
-            # mass_error = calculate_mass_error(mz, ms2_monoisotopic_mz)
+                # Implement MS1 survey scan intensity check to validate correct_channel
+                # Retrieve MS1 spectrum from scan containing the most intense precursor ion peak determined on line 276
+                # Check if the precuror ion is among the top precursor_num most intense peaks within the MS1 survey scan
+                flag_status = ""
+                needs_precursor_check = (
+                    most_intense_precursor_mz not in best_top_peaks_mz
+                )
 
-            # Append the extracted data to feature_data list
-            """feature_data.append(
-                [
-                    file_name,
-                    compound_name,
-                    smiles,
-                    adduct,
-                    mz,
-                    ms2_monoisotopic_mz,
-                    adj_correct_channel,
-                    mass_error,
-                    sample_type,
-                    gradient,
-                    column_type,
-                    peak_apex,
-                ]
-            )"""
+                # Define updated variables for print statements and data export
+                final_channel = None
+                final_intensity = None
+                final_scan_index = None
+                observed_precursor_mz_new = None
+
+                if needs_precursor_check:
+
+                    # If there is only one valid channel_num in nonzero_intensity_channels, flag the compound in output
+                    if len(nonzero_intensity_channels) == 1:
+                        flag_status = "FLAG"
+                        final_channel = nonzero_intensity_channels[0]
+
+                    # If there are exactly two valid channel_num in nonzero_intensity_channels, switch to the second Channel and apply scan iteration logic
+                    elif len(nonzero_intensity_channels) == 2:
+                        new_channel = nonzero_intensity_channels[1]
+                        correct_channel = new_channel
+
+                        # Apply scan iteration logic within new correct_channel
+                        scan_indices_new = rdr._MassLynxReader__get_scan_indices(
+                            new_channel, rt_min, rt_max
+                        )
+                        most_intense_value_new = -np.inf
+                        for scan_index in scan_indices_new:
+                            scan_mz, scan_intensity = rdr.scan_reader.ReadScan(
+                                new_channel, scan_index
+                            )
+                            scan_mz = np.array(scan_mz)
+                            scan_intensity = np.array(scan_intensity)
+
+                            # Identify the precursor ion peak with the extracted MS/MS fragmentation spectrum
+                            (
+                                observed_mz_temp,
+                                observed_intensity_temp,
+                            ), _ = observed_mz(
+                                zip(scan_mz, scan_intensity), mz, self.mz_tolerance
+                            )
+
+                            # Update the correct scan if this spectrum has a higher precursor ion intensity
+                            if observed_intensity_temp > most_intense_value_new:
+                                most_intense_value_new = observed_intensity_temp
+                                final_scan_index = scan_index
+                                observed_precursor_mz_new = observed_mz_temp
+                        final_channel = new_channel
+                        final_intensity = most_intense_value_new
+
+                    # If there are more than 3 valid channel_num in nonzero_intensity_channels, evaluate these
+                    elif len(nonzero_intensity_channels) >= 3:
+                        best_channel = None
+                        best_precursor_intensity = -np.inf
+                        for new_channel in nonzero_intensity_channels[1:3]:
+                            scan_indices_new = rdr._MassLynxReader__get_scan_indices(
+                                new_channel, rt_min, rt_max
+                            )
+                            most_intense_value_new = -np.inf
+                            most_intense_scan_index_new = None
+                            for scan_index in scan_indices_new:
+
+                                # Apply scan iteration logic within MS/MS fragmentation Channels
+                                scan_mz, scan_intensity = rdr.scan_reader.ReadScan(
+                                    new_channel, scan_index
+                                )
+                                scan_mz = np.array(scan_mz)
+                                scan_intensity = np.array(scan_intensity)
+
+                                # Identify the precursor ion peak within the extracted MS/MS fragmentation spectrum
+                                (
+                                    observed_mz_temp,
+                                    observed_intensity_temp,
+                                ), _ = observed_mz(
+                                    zip(scan_mz, scan_intensity), mz, self.mz_tolerance
+                                )
+
+                                # Update the correct scan if this spectrum has a higher precursor ion intensity
+                                if observed_intensity_temp > most_intense_value_new:
+                                    most_intense_value_new = observed_intensity_temp
+                                    most_intense_scan_index_new = scan_index
+                                    temp_mz = observed_mz_temp
+
+                            # Choose the better Channel based on precuror intensty
+                            if most_intense_value_new > best_precursor_intensity:
+                                best_precursor_intensity = most_intense_value_new
+                                best_channel = new_channel
+                                best_observed_mz = temp_mz
+                        final_channel = best_channel
+                        final_intensity = best_precursor_intensity
+                        observed_precursor_mz_new = best_observed_mz
+            print(observed_precursor_mz_new)
+            if needs_precursor_check:
+                print(
+                    f"\t\t...Precursor ion peak NOT among {num_precursors} most intense peaks in MS1 surey scan..."
+                )
+                if len(nonzero_intensity_channels) == 2:
+                    print(
+                        f"\t\tEvaluating MS/MS fragmentation data from {nonzero_intensity_channels[1]}."
+                    )
+                else:
+                    print(
+                        f"\t\tEvaluating MS/MS fragmentation data from additional valid Channels."
+                    )
+            else:
+                print(
+                    f"\t\tPrecursor ion peak IS among {num_precursors} most intense peaks in MS1 survey scan..."
+                )
+                print(f"\t\tEvaluating original Channel.")
 
             # Generate names for output spectrum files
             base_name = f"{compound_name}_{mz}_{adduct}_{os.path.splitext(os.path.basename(file_name))[0]}"
@@ -354,8 +532,14 @@ class DDARawProcessor:
             observed_mz_final = (
                 observed_precursor_fallback_mz
                 if observed_precursor_fallback_mz
-                else ms2_monoisotopic_mz
+                else (
+                    observed_precursor_mz_new
+                    if needs_precursor_check and observed_precursor_mz_new is not None
+                    else ms2_monoisotopic_mz
+                )
             )
+
+            # Calculate value
             mass_error = (
                 calculate_mass_error(mz, observed_mz_final)
                 if observed_mz_final is not None
@@ -366,7 +550,11 @@ class DDARawProcessor:
             channel_output = (
                 "MS1"
                 if observed_mz_final == observed_precursor_fallback_mz
-                else adj_correct_channel
+                else (
+                    final_channel + 1
+                    if final_channel is not None
+                    else adj_correct_channel
+                )
             )
 
             # Append the extracted data to feature_data list
@@ -384,6 +572,7 @@ class DDARawProcessor:
                     gradient,
                     column_type,
                     peak_apex,
+                    flag_status,
                 ]
             )
 
