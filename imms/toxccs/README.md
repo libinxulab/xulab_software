@@ -239,6 +239,7 @@ Excel (.xlsx) spreadsheet containing the following extracted data:
 * Observed m/z: m/z value of the identified monoisotopic peak (method adapted from MetaboAnnotatoR; https://pubs.acs.org/doi/10.1021/acs.analchem.1c03032)
 * Channel Number: value of the Channel from which the MS/MS fragmentation spectrum was extracted
 * Mass error (ppm): mass error between the target m/z and observed m/z
+* Flag: "FLAG" message for potentially false extracted MS/MS fragmentation spectra 
 
 Finally, `DDARawProcessor.extract` creates a folder in the root directory (if it do not already exist) called "Extracted Data," where images of the chromatographic and MS/MS spectral data are saved to. 
 
@@ -251,8 +252,9 @@ data = DDARawProcessor("dda_test.xlsx")
 
 # Execute main extraction sequence for MS/MS fragmentation spectra
 # Data must be centroided and collected in Fast-DDA mode
-# # Specify m/z tolerance in Da and number of precursor ions selected for fragmentation
-data.dda_extract(mz_tolerance=0.01, num_precursors=5)
+# Specify m/z tolerance in Da and number of precursor ions selected for fragmentation
+# Specify acquisition window (i.e., 0 to 1.8 min) for dynamic plotting window
+data.dda_extract(mz_tolerance=0.01, num_precursors=5, x_min=0, x_max=1.8)
 ```
 
 

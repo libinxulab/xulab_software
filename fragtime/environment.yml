@@ -1,0 +1,24 @@
+name: fragtime
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+
+  # Core scientific stack
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - statsmodels
+
+  # HDF5 / IO
+  - h5py
+  - hdf5plugin
+  - openpyxl
+  - pymzml
+
+  # Notebook
+  - jupyterlab
+

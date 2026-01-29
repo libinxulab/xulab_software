@@ -79,7 +79,7 @@ def monoisotopic_peak(identified_peaks, target_mz, tolerance=0.025):
     return highest_intensity_peak[0]
 
 
-def observed_mz(identified_peaks, target_mz, mz_tolerance=0.025):
+def observed_mz(identified_peaks, target_mz, mz_tolerance):
     """
     utils/observed_mz
     description:

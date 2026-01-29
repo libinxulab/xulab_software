@@ -713,6 +713,8 @@ def combined_dda_figure(
     smiles,
     rt_min,
     rt_max,
+    x_min,
+    x_max,
 ):
     """
     toxccs/utils/plotting.py/combined_dda_figure
@@ -775,21 +777,23 @@ def combined_dda_figure(
                 lw=1.5,
                 label="Gaussian Fit",
             )
-            ax1.set_xlim(0, 1.8)
+            ax1.set_xlim(x_min, x_max)
 
         # Condition to plot if no peaks were detected or fitting fails
         if len(peak_indices) == 0 or popt_multi_gaussian == []:
-            ax1.set_xlim(0, 1.8)
+            ax1.set_xlim(x_min, x_max)
         else:
-            ax1.set_xlim(0, 1.8)
+            ax1.set_xlim(x_min, x_max)
         y_values = multi_gaussian_fixed_mu(
             rt[peak_indices], mu_values, *popt_multi_gaussian
         )
 
         # Add LC chromatogram peak annotations
         for j in peak_indices:
+            peak_height = rt_i[j]
             label = str(rt[j])
-            label_y_pos = max(rt_i) + 0.02 * max(rt_i)
+            label_y_pos = peak_height + 0.02 * peak_height
+            # label_y_pos = max(rt_i) + 0.02 * max(rt_i)
             ax1.annotate(
                 label[:4],
                 xy=(rt[j], label_y_pos),
@@ -802,7 +806,8 @@ def combined_dda_figure(
 
         ax1.scatter(
             rt[peak_indices],
-            y_values,
+            rt_i[peak_indices],
+            # y_values,
             color="purple",
             marker="*",
             s=40,
