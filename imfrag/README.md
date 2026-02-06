@@ -6,7 +6,7 @@ IMFrag is a Jupyter notebook-based workflow designed to facilitate the investiga
 
 ## How to Use IMFrag
 
-IMFrag is provided as a Jupyter notebook to be run on your local machine. Follow the steps below to install the requirements using [conda](https://docs.conda.io/projects/conda/en/stable/index.html) and launch the [IMFrag_demo](IMFrag_demo.ipynb) notebook.
+IMFrag is provided as a Jupyter notebook to be run on your local machine. Follow the steps below to install the requirements using [conda](https://docs.conda.io/projects/conda/en/stable/index.html) and launch the [imfrag_demo](imfrag_demo.ipynb) notebook.
 
 Download the repo as a ZIP file and extrat it locally, then navigate to:
 ```bash

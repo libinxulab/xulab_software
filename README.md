@@ -10,7 +10,7 @@ __xulab_software/__
   * [ccsbase](imms/ccsbase/README.md)
   * [expysomics](imms/expysomics/README.md)
   * [toxccs](imms/toxccs/README.md)
-* __In-Source Fragmentation/__
+* __imfrag/__
   * [IMFrag](imfrag/README.md)
 
 
