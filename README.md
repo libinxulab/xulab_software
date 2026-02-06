@@ -10,8 +10,8 @@ __xulab_software/__
   * [ccsbase](imms/ccsbase/README.md)
   * [expysomics](imms/expysomics/README.md)
   * [toxccs](imms/toxccs/README.md)
-* __fragtime/__
-  * [fragtime](fragtime/README.md)
+* __In-Source Fragmentation/__
+  * [IMFrag](imfrag/README.md)
 
 
 If you would like to add/edit code in this repository, see instructions [here](CONTRIBUTING.md).
