@@ -1,4 +1,4 @@
-name: fragtime
+name: imfrag
 channels:
   - conda-forge
 dependencies:

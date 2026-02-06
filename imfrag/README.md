@@ -6,36 +6,36 @@ IMFrag is a Jupyter notebook-based workflow designed to facilitate the investiga
 
 ## How to Use IMFrag
 
-IMFrag is provided as a Jupyter notebook to be run on your local machine. Follow the steps below to install the requirements using [conda](https://docs.conda.io/projects/conda/en/stable/index.html) and launch the [IMFrag_demo](IMFrag_demo.ipynb) notebook.
+IMFrag is provided as a Jupyter notebook to be run on your local machine. Follow the steps below to install the requirements using [conda](https://docs.conda.io/projects/conda/en/stable/index.html) and launch the [imfrag_demo](imfrag_demo.ipynb) notebook.
 
 Download the repo as a ZIP file and extrat it locally, then navigate to:
 ```bash
-xulab_software/IMFrag
+xulab_software/imfrag
 ```
 
-Alternative, clone the repo using Git:
+Alternatively, clone the repo using Git:
 ```
 git clone https://github.com/libinxulab/xulab_software.git
-cd xulab_software/IMFrag
+cd xulab_software/imfrag
 ```
 
 Option A (recommended): Create and activate a [conda](https://docs.conda.io/projects/conda/en/stable/index.html) environment:
 ```bash
 conda env create -f environment.yml
-conda activate IMFrag
+conda activate imfrag
 ```
 
 Option B: Install dependencies using pip:
 ```bash
 conda create -n IMFrag pthon=3.10
-conda activate IMFrag 
+conda activate imfrag 
 ```
 Then install the core dependencies listed in `requirements.txt`:
 ```bash
 pip install -r requirements.txt
 ```
 
-IMFrag is powered by [DEIMoS](https://pubs.acs.org/doi/10.1021/acs.analchem.1c05017), the open-source Python API developed by Pacific Northwest National Laboratory, for processing multidimensional mass spectrometry data. DEIMoS must be [properly installed](https://deimos.readthedocs.io/en/latest/getting_started/installation.html) prior to using IMFrag. Note that the IMFrag virtual environment created above should already contain the required dependencies for both IMFrag and DEIMoS. 
+IMFrag is powered by [DEIMoS](https://pubs.acs.org/doi/10.1021/acs.analchem.1c05017), the open-source Python API developed by Pacific Northwest National Laboratory, for processing multidimensional mass spectrometry data. DEIMoS must be [properly installed](https://deimos.readthedocs.io/en/latest/getting_started/installation.html) prior to using IMFrag. Note that the imfrag virtual environment created above should already contain the required dependencies for both IMFrag and DEIMoS. 
 
 The current version of IMFrag also requires that native `.raw` files be converted to the `mzML` format. This step can be achieved with the standalone [Waters2mzML](https://github.com/AnP311/Waters2mzML/releases) tool; detailed instructions are provided in the notebook. 
 
@@ -46,7 +46,7 @@ The current version of IMFrag also requires that native `.raw` files be converte
 3. Waters2mzML, version 1.2.0 https://github.com/AnP311/Waters2mzML/releases (accessed Nov 2025)
 
 ## Example Data
-Example `HDF5` raw files and associated target lists are provided in the `IMFrag/example` folder. 
+Example `HDF5` raw files and associated target lists are provided in the `imfrag/example` folder. 
 Additional `.raw` IM-DIA data files used to develop and assess IMFrag are freely available for download at [MassIVE](doi:10.25345/C5TQ5RT4W]).
 
 ## Contact Information
@@ -68,7 +68,7 @@ IMFrag currently requires an input target list containing MS1 features of intere
 | Plasma_1SF_1 |  144.0808  | Plasma_203_HDMSE.h5 |
 | Plasma_ISF_2 |  188.0707  | Plasma_203_HDMSE.h5 |
 
-A template is provided in the `IMFrag/example` folder for your convenience. 
+A template is provided in the `imfrag/example` folder for your convenience. 
 
 ### Peak Picking in the LC and IM Dimensions
 Once the native `.raw` data files have been correctly converted, peaks around each target m/z are picked in both the LC and IM dimensions. 
