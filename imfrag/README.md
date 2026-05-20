@@ -8,7 +8,7 @@ IMFrag is a Jupyter notebook-based workflow designed to facilitate the investiga
 
 IMFrag is provided as a Jupyter notebook to be run on your local machine. Follow the steps below to install the requirements using [conda](https://docs.conda.io/projects/conda/en/stable/index.html) and launch the [imfrag_demo](imfrag_demo.ipynb) notebook.
 
-Download the repo as a ZIP file and extrat it locally, then navigate to:
+Download the repo as a ZIP file and extract it locally, then navigate to:
 ```bash
 xulab_software/imfrag
 ```
@@ -96,6 +96,49 @@ IMFrag also leverages the spectral deconvolution tools provided by [DEIMoS](http
 
 Because precursor-fragment ions relationships are, by design, not directly preserved in DIA experiments, IMFrag does not assume the identity of any chemical feature prior to analysis. Instead, the pseudo-MS/MS spectra for each target m/z and their associated ions - identified using the mobility-guided extraction approach described above - are separately constructed via deconvolution in both LC and IM space. MS/MS spectra may then be compared to confirm the presence of overlapping fragments between ISFs and their precursors. 
 
+### ISF Confidence Scoring
+
+IMFrag assigns confidence labels to candidate ISFs using two complementary scoring frameworks. The first is based on IM separation and alignment behavior, and the second leverages techniques described by [Guo et al.](https://pubs.acs.org/doi/10.1021/acs.analchem.1c01644) based on LC co-elution and MS/MS similarity patterns. Within the IM framework, drift-time resolution $R_s$ between MS2 mobilogram peaks and the correlation between corresponding MS1 and MS2 mobility profiles are evaluated. High-confidence ISFs are defined as features exhibiting (i) high MS2 drift-time resollution and (ii) low Pearson correlatoin between MS1 and MS2 mobilogram profiles due to the presence of a second, later-arriving MS2 ion population generated via post-mobility CID. IMFrag also incorporates a fallback strategy for scenarios where IM separation is insufficient to confidently label an ISF based exclusively on mobility behavior. This strategy incorporates a traditional LC-HRMS framework, requiring LC co-elution and the presence of the candidate ISF in the putative precursor's MS/MS spectrum (within a pre-defined mass threshold). The latter metric is evaluted usign the reverse dot product. 
+
+<img src="figures/IMFrag_Quantitative_Metrics.png" width="750">
+
+#### Ion Mobility Scoring Metrics
+
+These IM-based parameters and ISF scoring metrics are based on the fitted Gaussian parameters from the MS1 and MS2 mobility profiles.
+
+| Metric | Formula | Interpretation |
+|:------:|:-------:|:--------------:|
+| `drift_resolution` ($R_s$) | \|Δμ\| / 0.5·(FWHM_MS1 + FWHM_MS2) | Separation between ion populations in FWHM units. $R_s$ ≥ 1.0 = baseline-resolved; 0.5–1.0 = partial |
+| `drift_delta_pct` | 100·\|Δμ\| / μ_MS1 | Percent drift-time difference between MS1 and MS2 centers |
+| `r_im` | μ_MS1 / FWHM_MS1 | IM resolving power |
+| `min_resolvable_delta_ms` | μ_MS1 / r_im |Pairs with Δdrift below this value cannot be resolved, regardless of threshold |
+| `mobility_profile_pearson_r` ($r$) | Pearson correlation coefficient $r$ between MS1 and offset-corrected MS2 mobilograms | Features with low Pearson correlation support the presence of distinct mobility profiles |
+| `ms1_unaligned_intensity_ratio` | MS1 mobiligram area in unaligned drift window / aligned drift window | The percentage of MS1 fragment signal exhibiting non-overlapping mobility behavior with the putative precursor |
+| `im_resolvable` | $R_s$ ≥ 0.5 (default) | Adjustable threshold that, if not satisfied, initiates evaluation based on spectral similarity (see below)|
+
+#### Spectral Similarity Scoring Metrics
+
+When IM resolution is insufficient for confident ISF classification, a fallback strategy based on traditional LC co-elution and MS2 similarity patterns is employed.
+
+| Metric | Definition | 
+|:------:|:----------:|
+| `lc_coelution_pearson_r` | Pearson $r$ between MS1 extracted ion chromatograms of the candidate ISF and its top precursor candidate 
+| `ms2_subspectrum_match` | Evaluation of the candidate ion's presence in the precursor MS2 spectrum (within 0.02 Da) 
+| `ms2_reverse_dot_product` | Cosine similarity between the candidate ion's MS2 spectrum and the precursor MS2 spectrum
+| `ms2_matched_ratio` | Fraction of candidate MS2 peaks matched in the precursor's MS2 
+
+#### Composite Confidence Labels
+
+Following evaluation, every candidate receives a single `isf_confidence` label based on the criteria described below. `Note that these parameters may require significant tuning depending on IM resolving power. Additional studies are warranted to determine optimal starting conditions for ISF evaluation.`
+
+| Label | Criteria |
+|:-----:|:--------:|
+| `high_im` | $R_s$ ≥ 1.0 AND mobility_profile_pearson_r ≤ 0.6 AND ms1_unaligned_intensity_ratio ≥ 0.3 |
+| `medium_im` | 0.5 ≤ $R_s$ < 1.0 |
+| `high_spectral` | lc_coelution_pearson_r ≥ 0.8 AND ms2_subspectrum_match AND ms2_reverse_dot_product > 0.5 OR ms2_matched_ratio > 0.7 |
+| `medium_spectral` | lc_coelution_pearson_r ≥ 0.8 AND ms2_subspectrum_match |
+| `low` | lc_coelution_pearson_r ≥ 0.8  |
+| `none` | No criteria met in either the IM or spectral similarity frameworks |
 
 
 
