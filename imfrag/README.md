@@ -8,7 +8,9 @@ IMFrag is a Jupyter notebook-based workflow designed to facilitate the investiga
 
 Please cite our paper in [Analytical Chemistry](https://pubs.acs.org/doi/10.1021/acs.analchem.6c01388) if you use IMFrag or its methods:
 ```text 
-Nguyen, R.; Anandkumar, A.; Rangel, G.; Liem, J.; Lin, Y. S.; Xu, L. IMFrag: A Tool to Recognize In-Source Fragmentation in Ion Mobility-Enabled Data-Independent Acquisition Workflows. Anal. Chem. 2026. https://pubs.acs.org/doi/10.1021/acs.analchem.6c01388.
+Nguyen, R.; Anandkumar, A.; Rangel, G.; Liem, J.; Lin, Y. S.; Xu, L. 
+IMFrag: A Tool to Recognize In-Source Fragmentation in Ion Mobility-Enabled Data-Independent Acquisition Workflows. Anal. Chem. 2026. 
+https://pubs.acs.org/doi/10.1021/acs.analchem.6c01388.
 ```
 For commercial use, please contact license@uw.edu.
 

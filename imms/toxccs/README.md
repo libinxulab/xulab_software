@@ -1,3 +1,15 @@
+## ToxBase: A Multidimensional ToxCast Reference Database
+The code in this repository was used to develop ToxBase, a multidimensional reference database containing accurate mass, retention time, collision cross-section, and Ms/MS spectra for over 2,000 chemicals sourced from the U.S. Environmental Protection Agency's ToxCast chemical library. **The complete database in MSP format can be downloaded [here](database/ToxBase.msp) and is also available on [Panorama](https://panoramaweb.org/Panorama%20Public/2025/UW%20Xu%20Lab%20-%20ToxBase/panoramapublic-viewSpecLib.view?specLibId=198592&allSpecLibIds=198592%2C198591%2C198590&specLibInfoId=null)**. 
+
+## Citation
+Please cite our paper in [Environmental Science & Technology](https://pubs.acs.org/doi/10.1021/acs.est.5c18068) if you use ToxBase:
+```text
+Nguyen, R.; Rangel, G.; Liu, X.; Santoso, R. A.; Bantwal, A.; Ross, D. H.; 
+Seguin, R. P.; Liem, J.; Lin, Y. S.; Pratt, B.; MacLean, B. X.; MacCoss, M. J.; 
+Xu, L. ToxBase: A Multidimensional ToxCast Reference Database for High-Throughput
+Human Exposome Analysis. Environ. Sci. Technol. 2026. 
+https://pubs.acs.org/doi/10.1021/acs.est.5c18068
+```
 ## toxccs
 
 This Python package is intended to automate the extraction and processing of LC-IM-MS/MS data for building multi-dimensional reference databases. The current version of `toxccs` interfaces directly with Waters .raw data and extracts both chromatographic and mobility information for manual review. For Please note that the `dhrmasslynxapi` package containing the original Waters sdk files, copied into the `sdk\` directory, are required to utilize the `toxccs` package and its sub-packages. The sdk files may be obtained from the lab NAS (under `lab_resources/masslynx_sdk_files/`):
