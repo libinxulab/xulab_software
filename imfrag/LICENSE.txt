@@ -19,7 +19,7 @@ Grant of License - Subject to the terms and conditions of the Agreement, Univers
 University Marks - Licensee shall not remove the University’s copyright notice and/or other proprietary notices. No provision of the Agreement grants the Licensee any right or license to use the name, logo, or any marks owned by or associated with the University or the names, or identities of any member of the faculty, staff, or student body of the University except as may be otherwise provided in this Agreement.
 
 Publication Obligation - The Licensee agrees that if this Software is used for published work, which may include but not limited to scientific journals, websites, blogs, and conferences, the following citations should be made in the published work:
-IMFrag software from the University of Washington, Libin Xu’s laboratory, was used in this research.
+Nguyen, R.; Anandkumar, A.; Rangel, G.; Liem, J.; Lin, Y. S.; Xu, L. IMFrag: A Tool to Recognize In-Source Fragmentation in Ion Mobility-Enabled Data-Independent Acquisition Workflows. Anal. Chem. 2026. https://pubs.acs.org/doi/10.1021/acs.analchem.6c01388.
 
 Rights of the U.S. Government and Third Parties - No provision of this Agreement limits, conditions or otherwise affects the United States of America's or any other third party’s rights and interests in the Software.
 Ownership - Title to and ownership of the Software shall at all times remain with the University and Licensee shall not have any title or ownership interest therein. All rights not expressly granted to Licensee under the Agreement are reserved by the University.

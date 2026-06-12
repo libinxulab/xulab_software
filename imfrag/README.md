@@ -4,6 +4,13 @@ IMFrag is a Jupyter notebook-based workflow designed to facilitate the investiga
 
 <img src="figures/IMFrag_Expanded_Graphical_Abstract.png" width="750">
 
+## Citation
+
+Please cite our paper in [Analytical Chemistry](https://pubs.acs.org/doi/10.1021/acs.analchem.6c01388) if you use IMFrag or its methods:
+```bash 
+Nguyen, R.; Anandkumar, A.; Rangel, G.; Liem, J.; Lin, Y. S.; Xu, L. IMFrag: A Tool to Recognize In-Source Fragmentation in Ion Mobility-Enabled Data-Independent Aquisition Workflows. Anal. Chem. 2026. https://pubs.acs.org/doi/10.1021/acs.analchem.6c01388.
+```
+For commercial use, please contact license@uw.edu.
 ## How to Use IMFrag
 
 IMFrag is provided as a Jupyter notebook to be run on your local machine. Follow the steps below to install the requirements using [conda](https://docs.conda.io/projects/conda/en/stable/index.html) and launch the [imfrag_demo](imfrag_demo.ipynb) notebook.
